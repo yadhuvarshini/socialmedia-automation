@@ -4,13 +4,12 @@ export const config = {
   port: parseInt(process.env.PORT || '4000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   mongoUri: process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/blazly',
-  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
+  frontendUrl: process.env.FRONTEND_URL || 'https://localhost:5173',
   linkedin: {
     clientId: process.env.LINKEDIN_CLIENT_ID || '86swiutwriegdi',
     clientSecret: process.env.LINKEDIN_CLIENT_SECRET,
     // Use frontend origin so the OAuth callback is proxied and the session cookie is set for the app origin (fixes 401 when posting)
-    redirectUri: process.env.LINKEDIN_REDIRECT_URI || `${process.env.FRONTEND_URL || 'http://localhost:5173'}/api/auth/linkedin/callback`,
-    redirectUri: process.env.LINKEDIN_REDIRECT_URI || `${process.env.FRONTEND_URL || 'http://localhost:5173'}/api/auth/linkedin/callback`,
+    redirectUri: process.env.LINKEDIN_REDIRECT_URI || `${process.env.FRONTEND_URL || 'https://localhost:5173'}/api/auth/linkedin/callback`,
     scope: 'w_member_social openid profile',
   },
   facebook: {
