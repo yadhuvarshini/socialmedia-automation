@@ -1,0 +1,129 @@
+.instagram-account-selection {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: linear-gradient(135deg, #833ab4 0%, #fd1d1d 50%, #fcb045 100%);
+}
+
+.instagram-account-selection__card {
+  background: white;
+  border-radius: 12px;
+  padding: 2.5rem;
+  max-width: 600px;
+  width: 100%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.instagram-account-selection__title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem 0;
+  color: #1a1a1a;
+}
+
+.instagram-account-selection__subtitle {
+  color: #666;
+  margin: 0 0 2rem 0;
+  line-height: 1.5;
+}
+
+.instagram-account-selection__error {
+  background: #fee;
+  color: #c33;
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+  border: 1px solid #fcc;
+}
+
+.instagram-account-selection__empty {
+  text-align: center;
+  padding: 2rem 0;
+  color: #666;
+}
+
+.instagram-account-selection__retry {
+  margin-top: 1rem;
+  padding: 0.75rem 1.5rem;
+  background: #833ab4;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.instagram-account-selection__retry:hover {
+  background: #7232a5;
+}
+
+.instagram-account-selection__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.instagram-account-selection__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+}
+
+.instagram-account-selection__item:hover:not(:disabled) {
+  border-color: #833ab4;
+  background: #faf0ff;
+}
+
+.instagram-account-selection__item:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.instagram-account-selection__item-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
+}
+
+.instagram-account-selection__item-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.instagram-account-selection__item-name {
+  margin: 0 0 0.15rem 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.instagram-account-selection__item-page {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.instagram-account-selection__spinner {
+  color: #833ab4;
+  font-size: 1.5rem;
+}
+
+.instagram-account-selection__loader {
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+}
