@@ -7,6 +7,8 @@ import { createPost as createLinkedInPost, buildAuthorUrn, getMemberId } from '.
 import { createPost as createFacebookPost } from '../services/facebook.js';
 import { createPost as createTwitterPost } from '../services/twitter.js';
 import { createPost as createThreadsPost } from '../services/threads.js';
+import { createPost as createRedditPost, refreshAccessToken as refreshRedditToken } from '../services/reddit.js';
+import { createPost as createInstagramPost } from '../services/instagram.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -131,6 +133,70 @@ router.post('/', async (req, res) => {
               trimmed
             );
             // Update last used
+            integration.lastUsedAt = new Date();
+            await integration.save();
+            break;
+
+          case 'reddit':
+            if (!integration.accessToken || !integration.redditSubreddit) {
+              errors.push({ platform: 'reddit', error: 'Reddit credentials or subreddit missing' });
+              continue;
+            }
+            // Check if token is expired and refresh if needed
+            if (integration.tokenExpiresAt && integration.tokenExpiresAt < new Date() && integration.redditRefreshToken) {
+              const refreshResult = await refreshRedditToken(integration.redditRefreshToken);
+              if (refreshResult.error) {
+                errors.push({ platform: 'reddit', error: 'Failed to refresh Reddit token: ' + refreshResult.error });
+                continue;
+              }
+              integration.accessToken = refreshResult.access_token;
+              integration.tokenExpiresAt = new Date(Date.now() + (refreshResult.expires_in || 3600) * 1000);
+              await integration.save();
+            }
+            if (trimmed.length > 300) {
+              // Reddit: use first 300 chars as title, rest as body
+              const redditTitle = trimmed.substring(0, 300);
+              const redditBody = trimmed.substring(300);
+              result = await createRedditPost(
+                integration.accessToken,
+                integration.redditSubreddit,
+                redditTitle,
+                redditBody
+              );
+            } else {
+              result = await createRedditPost(
+                integration.accessToken,
+                integration.redditSubreddit,
+                trimmed,
+                ''
+              );
+            }
+            integration.lastUsedAt = new Date();
+            await integration.save();
+            break;
+
+          case 'instagram':
+            if (!integration.instagramBusinessAccountId || !integration.instagramPageAccessToken) {
+              errors.push({ platform: 'instagram', error: 'Instagram Business Account not configured' });
+              continue;
+            }
+            if (trimmed.length > 2200) {
+              errors.push({ platform: 'instagram', error: 'Caption exceeds 2200 characters' });
+              continue;
+            }
+            // Instagram requires an image for feed posts
+            // Check if imageUrl is provided in the request body
+            const imageUrl = req.body?.imageUrl;
+            if (!imageUrl) {
+              errors.push({ platform: 'instagram', error: 'Instagram requires an image URL for feed posts' });
+              continue;
+            }
+            result = await createInstagramPost(
+              integration.instagramPageAccessToken,
+              integration.instagramBusinessAccountId,
+              trimmed,
+              imageUrl
+            );
             integration.lastUsedAt = new Date();
             await integration.save();
             break;

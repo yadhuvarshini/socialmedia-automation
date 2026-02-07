@@ -8,6 +8,8 @@ import { getMemberId } from '../services/linkedin.js';
 import { verifyFacebookToken, getPages, exchangeToken } from '../services/facebook.js';
 import { getRequestToken, getAccessToken, verifyTwitterCredentials } from '../services/twitter.js';
 import { exchangeCodeForToken, getThreadsUser } from '../services/threads.js';
+import { exchangeCodeForToken as exchangeRedditCode, getRedditUser, getUserSubreddits } from '../services/reddit.js';
+import { exchangeCodeForToken as exchangeInstagramCode, exchangeForLongLivedToken, getFacebookUser, getPagesWithInstagram, getInstagramAccount } from '../services/instagram.js';
 
 const router = Router();
 const { linkedin, frontendUrl } = config;
@@ -421,6 +423,290 @@ router.get('/threads/callback', async (req, res) => {
   } catch (err) {
     const msg = err.response?.data?.error_message || err.message;
     res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(msg)}`);
+  }
+});
+
+// Reddit Integration
+router.get('/reddit', (req, res) => {
+  const state = uuidv4();
+  req.session = req.session || {};
+  req.session.redditOAuthState = state;
+  req.session.redditUserId = req.user._id.toString();
+
+  const params = new URLSearchParams({
+    client_id: config.reddit.clientId,
+    response_type: 'code',
+    state,
+    redirect_uri: config.reddit.redirectUri,
+    duration: 'permanent',
+    scope: 'identity submit read mysubreddits',
+  });
+
+  res.redirect(`https://www.reddit.com/api/v1/authorize?${params}`);
+});
+
+router.get('/reddit/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+
+  if (error) {
+    return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(error)}`);
+  }
+
+  const savedState = req.session?.redditOAuthState;
+  const savedUserId = req.session?.redditUserId;
+  if (!savedState || savedState !== state || !savedUserId) {
+    return res.status(401).send('Invalid state');
+  }
+
+  if (!code) {
+    return res.redirect(`${frontendUrl}/home?error=missing_code`);
+  }
+
+  try {
+    const result = await exchangeRedditCode(code);
+
+    if (result.error) {
+      return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(result.error)}`);
+    }
+
+    const { access_token: accessToken, refresh_token: refreshToken, expires_in: expiresIn } = result;
+    const tokenExpiresAt = new Date(Date.now() + (expiresIn || 3600) * 1000);
+
+    const userInfo = await getRedditUser(accessToken);
+
+    if (userInfo.error) {
+      return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(userInfo.error)}`);
+    }
+
+    // Store subreddits in session for selection
+    const subreddits = await getUserSubreddits(accessToken);
+
+    req.session.redditAccessToken = accessToken;
+    req.session.redditRefreshToken = refreshToken;
+    req.session.redditTokenExpiresAt = tokenExpiresAt;
+    req.session.redditUserInfo = userInfo;
+    req.session.redditSubreddits = subreddits;
+    req.session.redditUserId = savedUserId;
+    delete req.session.redditOAuthState;
+
+    req.session.save(() => {
+      res.redirect(`${frontendUrl}/integrations/reddit/select-subreddit`);
+    });
+  } catch (err) {
+    const msg = err.response?.data?.error || err.message;
+    res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(msg)}`);
+  }
+});
+
+router.get('/reddit/subreddits', requireAuth, (req, res) => {
+  if (!req.session.redditSubreddits) {
+    return res.status(401).json({ error: 'No Reddit session found. Please sign in again.' });
+  }
+  res.json({ subreddits: req.session.redditSubreddits });
+});
+
+router.post('/reddit/select-subreddit', requireAuth, async (req, res) => {
+  const { subreddit } = req.body;
+  const savedUserId = req.session?.redditUserId;
+
+  if (!req.session.redditAccessToken || !savedUserId) {
+    return res.status(401).json({ error: 'No Reddit session found. Please sign in again.' });
+  }
+
+  if (!subreddit) {
+    return res.status(400).json({ error: 'Subreddit is required' });
+  }
+
+  try {
+    const userInfo = req.session.redditUserInfo;
+    const accessToken = req.session.redditAccessToken;
+    const refreshToken = req.session.redditRefreshToken;
+    const tokenExpiresAt = req.session.redditTokenExpiresAt;
+
+    const integrationData = {
+      userId: savedUserId,
+      platform: 'reddit',
+      platformUserId: userInfo.id,
+      platformUsername: userInfo.name,
+      accessToken,
+      refreshToken,
+      redditRefreshToken: refreshToken,
+      redditSubreddit: subreddit,
+      tokenExpiresAt,
+      profile: {
+        name: userInfo.name,
+        username: userInfo.name,
+        profilePicture: userInfo.icon_img,
+      },
+      isActive: true,
+      lastUsedAt: new Date(),
+    };
+
+    await Integration.findOneAndUpdate(
+      { userId: savedUserId, platform: 'reddit' },
+      integrationData,
+      { upsert: true, new: true }
+    );
+
+    delete req.session.redditAccessToken;
+    delete req.session.redditRefreshToken;
+    delete req.session.redditTokenExpiresAt;
+    delete req.session.redditUserInfo;
+    delete req.session.redditSubreddits;
+    delete req.session.redditUserId;
+
+    req.session.save(() => {
+      res.json({ ok: true });
+    });
+  } catch (err) {
+    console.error('Reddit Subreddit Selection Error:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Instagram Integration
+router.get('/instagram', (req, res) => {
+  const state = uuidv4();
+  req.session = req.session || {};
+  req.session.instagramOAuthState = state;
+  req.session.instagramUserId = req.user._id.toString();
+
+  const params = new URLSearchParams({
+    client_id: config.instagram.appId,
+    redirect_uri: config.instagram.redirectUri,
+    state,
+    scope: 'public_profile,email,pages_show_list,instagram_basic,instagram_content_publish',
+    response_type: 'code',
+  });
+
+  res.redirect(`https://www.facebook.com/v18.0/dialog/oauth?${params}`);
+});
+
+router.get('/instagram/callback', async (req, res) => {
+  const { code, state, error, error_reason } = req.query;
+
+  if (error) {
+    return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(error_reason || error)}`);
+  }
+
+  const savedState = req.session?.instagramOAuthState;
+  const savedUserId = req.session?.instagramUserId;
+  if (!savedState || savedState !== state || !savedUserId) {
+    return res.status(401).send('Invalid state');
+  }
+
+  if (!code) {
+    return res.redirect(`${frontendUrl}/home?error=missing_code`);
+  }
+
+  try {
+    const tokenResult = await exchangeInstagramCode(code, config.instagram.redirectUri);
+
+    if (tokenResult.error) {
+      return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(tokenResult.error)}`);
+    }
+
+    // Exchange for long-lived token
+    const longLivedResult = await exchangeForLongLivedToken(tokenResult.access_token);
+    const accessToken = longLivedResult.access_token || tokenResult.access_token;
+    const expiresIn = longLivedResult.expires_in || tokenResult.expires_in || 5184000;
+
+    // Get Facebook user profile
+    const fbUser = await getFacebookUser(accessToken);
+    if (fbUser.error) {
+      return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(fbUser.error)}`);
+    }
+
+    // Get pages with Instagram accounts
+    const pages = await getPagesWithInstagram(accessToken);
+
+    if (pages.length === 0) {
+      return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent('No Instagram Business accounts found. Please connect an Instagram Business/Creator account to a Facebook Page first.')}`);
+    }
+
+    req.session.instagramAccessToken = accessToken;
+    req.session.instagramFbUser = fbUser;
+    req.session.instagramPages = pages;
+    req.session.instagramTokenExpiresAt = new Date(Date.now() + expiresIn * 1000);
+    req.session.instagramUserId = savedUserId;
+    delete req.session.instagramOAuthState;
+
+    req.session.save(() => {
+      res.redirect(`${frontendUrl}/integrations/instagram/select-account`);
+    });
+  } catch (err) {
+    const msg = err.response?.data?.error?.message || err.message;
+    res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(msg)}`);
+  }
+});
+
+router.get('/instagram/accounts', requireAuth, (req, res) => {
+  if (!req.session.instagramPages) {
+    return res.status(401).json({ error: 'No Instagram session found. Please sign in again.' });
+  }
+  res.json({ pages: req.session.instagramPages });
+});
+
+router.post('/instagram/select-account', requireAuth, async (req, res) => {
+  const { pageId } = req.body;
+  const savedUserId = req.session?.instagramUserId;
+
+  if (!req.session.instagramAccessToken || !savedUserId) {
+    return res.status(401).json({ error: 'No Instagram session found. Please sign in again.' });
+  }
+
+  if (!pageId) {
+    return res.status(400).json({ error: 'Page ID is required' });
+  }
+
+  const pages = req.session.instagramPages || [];
+  const selectedPage = pages.find((p) => p.id === pageId);
+
+  if (!selectedPage || !selectedPage.instagram_business_account) {
+    return res.status(400).json({ error: 'Page not found or no Instagram account linked' });
+  }
+
+  try {
+    const igAccount = selectedPage.instagram_business_account;
+    const igInfo = await getInstagramAccount(selectedPage.access_token, igAccount.id);
+
+    const integrationData = {
+      userId: savedUserId,
+      platform: 'instagram',
+      platformUserId: igAccount.id,
+      platformUsername: igInfo.username || igAccount.username,
+      accessToken: req.session.instagramAccessToken,
+      tokenExpiresAt: req.session.instagramTokenExpiresAt,
+      instagramBusinessAccountId: igAccount.id,
+      instagramPageId: selectedPage.id,
+      instagramPageAccessToken: selectedPage.access_token,
+      profile: {
+        name: igInfo.username || igAccount.username || 'Instagram User',
+        username: igInfo.username || igAccount.username,
+        profilePicture: igInfo.profile_picture_url || igAccount.profile_picture_url,
+      },
+      isActive: true,
+      lastUsedAt: new Date(),
+    };
+
+    await Integration.findOneAndUpdate(
+      { userId: savedUserId, platform: 'instagram' },
+      integrationData,
+      { upsert: true, new: true }
+    );
+
+    delete req.session.instagramAccessToken;
+    delete req.session.instagramFbUser;
+    delete req.session.instagramPages;
+    delete req.session.instagramTokenExpiresAt;
+    delete req.session.instagramUserId;
+
+    req.session.save(() => {
+      res.json({ ok: true });
+    });
+  } catch (err) {
+    console.error('Instagram Account Selection Error:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
   }
 });
 

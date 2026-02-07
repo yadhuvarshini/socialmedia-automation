@@ -222,3 +222,15 @@
   border-color: black;
   background: rgba(0, 0, 0, 0.05);
 }
+
+.landing__social-btn--reddit:hover {
+  color: #FF4500;
+  border-color: #FF4500;
+  background: rgba(255, 69, 0, 0.05);
+}
+
+.landing__social-btn--instagram:hover {
+  color: #E4405F;
+  border-color: #E4405F;
+  background: rgba(228, 64, 95, 0.05);
+}

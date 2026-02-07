@@ -3,6 +3,8 @@ import { useAuth } from './hooks/useAuth';
 import Landing from './pages/Landing';
 import Home from './pages/Home';
 import FacebookPageSelection from './pages/FacebookPageSelection';
+import RedditSubredditSelection from './pages/RedditSubredditSelection';
+import InstagramAccountSelection from './pages/InstagramAccountSelection';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -28,6 +30,22 @@ export default function App() {
         element={
           <ProtectedRoute>
             <FacebookPageSelection />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/integrations/reddit/select-subreddit"
+        element={
+          <ProtectedRoute>
+            <RedditSubredditSelection />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/integrations/instagram/select-account"
+        element={
+          <ProtectedRoute>
+            <InstagramAccountSelection />
           </ProtectedRoute>
         }
       />

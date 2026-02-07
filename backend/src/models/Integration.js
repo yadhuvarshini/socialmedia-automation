@@ -11,7 +11,7 @@ const integrationSchema = new mongoose.Schema(
     platform: {
       type: String,
       required: true,
-      enum: ['linkedin', 'facebook', 'twitter', 'threads'],
+      enum: ['linkedin', 'facebook', 'twitter', 'threads', 'reddit', 'instagram'],
       index: true,
     },
     // Platform-specific IDs
@@ -28,6 +28,15 @@ const integrationSchema = new mongoose.Schema(
     facebookPageId: { type: String },
     facebookPageAccessToken: { type: String },
     facebookPageName: { type: String },
+
+    // Reddit-specific
+    redditRefreshToken: { type: String },
+    redditSubreddit: { type: String },
+
+    // Instagram-specific
+    instagramBusinessAccountId: { type: String },
+    instagramPageId: { type: String },
+    instagramPageAccessToken: { type: String },
 
     // Platform profile info
     profile: {
