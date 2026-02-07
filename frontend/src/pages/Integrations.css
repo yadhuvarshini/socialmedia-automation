@@ -1,0 +1,134 @@
+.integrations {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.integrations__header {
+  margin-bottom: 2rem;
+}
+
+.integrations__title {
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem 0;
+  color: #1a1a1a;
+}
+
+.integrations__subtitle {
+  color: #666;
+  margin: 0;
+}
+
+.integrations__loading {
+  text-align: center;
+  padding: 3rem;
+  color: #666;
+}
+
+.integrations__alert {
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+}
+
+.integrations__alert--error {
+  background: #fee;
+  color: #c33;
+  border: 1px solid #fcc;
+}
+
+.integrations__alert--success {
+  background: #efe;
+  color: #3c3;
+  border: 1px solid #cfc;
+}
+
+.integrations__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.integrations__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem;
+  background: white;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  transition: all 0.2s;
+}
+
+.integrations__item:hover {
+  border-color: #ccc;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.integrations__item-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
+}
+
+.integrations__item-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #f5f5f5;
+}
+
+.integrations__item-info {
+  flex: 1;
+}
+
+.integrations__item-name {
+  margin: 0 0 0.25rem 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.integrations__item-account {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.integrations__item-actions {
+  margin-left: 1rem;
+}
+
+.integrations__button {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: white;
+}
+
+.integrations__button--connect:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.integrations__button--disconnect {
+  background: #dc3545;
+}
+
+.integrations__button--disconnect:hover:not(:disabled) {
+  background: #c82333;
+}
+
+.integrations__button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

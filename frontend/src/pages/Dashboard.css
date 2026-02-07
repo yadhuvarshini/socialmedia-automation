@@ -1,0 +1,145 @@
+.dashboard {
+  min-height: 100vh;
+  background: var(--bg);
+  display: flex;
+}
+
+.dashboard__sidebar {
+  width: 240px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  height: 100vh;
+  left: 0;
+  top: 0;
+}
+
+.dashboard__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dashboard__logo {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #0a66c2, #004182);
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.1rem;
+  border-radius: 8px;
+}
+
+.dashboard__title {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.dashboard__nav {
+  flex: 1;
+  padding: 16px 0;
+}
+
+.dashboard__nav-item {
+  width: 100%;
+  padding: 12px 24px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.dashboard__nav-item:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.dashboard__nav-item--active {
+  background: var(--surface-hover);
+  color: var(--text);
+  font-weight: 600;
+  border-left: 3px solid #0a66c2;
+}
+
+.dashboard__sidebar-footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+}
+
+.dashboard__user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.dashboard__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.dashboard__name {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard__logout {
+  width: 100%;
+  padding: 8px 14px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  transition: background 0.15s, color 0.15s;
+  cursor: pointer;
+}
+
+.dashboard__logout:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.dashboard__main {
+  flex: 1;
+  margin-left: 240px;
+  max-width: 800px;
+  padding: 32px 24px;
+}
+
+.dashboard__composer {
+  margin-bottom: 40px;
+}
+
+.dashboard__section-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 16px;
+  color: var(--text);
+}
+
+.dashboard__loading,
+.post-list__empty {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.dashboard__posts {
+  margin-top: 32px;
+}
