@@ -207,7 +207,7 @@ router.get('/facebook', (req, res) => {
     client_id: config.facebook.appId,
     redirect_uri: `${config.frontendUrl}/api/auth/facebook/callback`,
     state,
-    scope: 'public_profile,email,pages_show_list,pages_read_engagement,pages_manage_posts,pages_read_user_content,instagram_basic,instagram_content_publish,threads_basic,threads_content_publish',
+    scope: 'public_profile,email,pages_show_list,pages_read_engagement,pages_manage_posts,pages_read_user_content',
     response_type: 'code',
   });
 
