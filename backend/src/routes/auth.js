@@ -11,6 +11,75 @@ import { getRequestToken, getAccessToken, verifyTwitterCredentials } from '../se
 const router = Router();
 const { linkedin, frontendUrl, session } = config;
 
+// Email/Password Signup
+router.post('/signup', async (req, res) => {
+  try {
+    const { email, password, firstName, lastName } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ error: 'Email already exists' });
+    }
+
+    const user = await User.create({
+      email,
+      password,
+      profile: {
+        firstName: firstName || '',
+        lastName: lastName || '',
+        profilePicture: `https://ui-avatars.com/api/?name=${firstName}+${lastName}&background=random`,
+      },
+      settings: {
+        theme: 'light',
+        notifications: true
+      }
+    });
+
+    req.session.userId = user._id.toString();
+    req.session.save((err) => {
+      if (err) return res.status(500).json({ error: 'Session error' });
+      res.json({ ok: true, user: { id: user._id, email: user.email, profile: user.profile } });
+    });
+  } catch (err) {
+    console.error('Signup Error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Email/Password Login
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user || !user.password) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    req.session.userId = user._id.toString();
+    req.session.save((err) => {
+      if (err) return res.status(500).json({ error: 'Session error' });
+      res.json({ ok: true, user: { id: user._id, email: user.email, profile: user.profile } });
+    });
+  } catch (err) {
+    console.error('Login Error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.get('/linkedin', (req, res) => {
   const state = uuidv4();
   req.session = req.session || {};
