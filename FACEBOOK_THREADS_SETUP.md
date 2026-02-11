@@ -60,9 +60,9 @@ THREADS_APP_SECRET=your_facebook_app_secret
    - Threads API (if available)
 3. **Valid OAuth Redirect URIs**:
    ```
-   http://localhost:5173/api/auth/facebook/callback
-   http://localhost:5173/api/auth/integrations/facebook/callback
-   http://localhost:5173/api/auth/integrations/threads/callback
+   https://localhost:5173/api/auth/facebook/callback
+   https://localhost:5173/api/auth/integrations/facebook/callback
+   https://localhost:5173/api/auth/integrations/threads/callback
    ```
 4. **Permissions Required**:
    - `public_profile`
@@ -79,11 +79,11 @@ THREADS_APP_SECRET=your_facebook_app_secret
 ### Step 1: Verify Backend
 ```bash
 # Check if Threads routes are registered
-curl http://localhost:4000/api/health
+curl https://localhost:4000/api/health
 ```
 
 ### Step 2: Test Frontend
-1. Open browser to `http://localhost:5173`
+1. Open browser to `https://localhost:5173`
 2. Sign in with any platform (LinkedIn recommended for testing)
 3. You should land on `/home`
 4. In the sidebar, under "Integrations", you should see:

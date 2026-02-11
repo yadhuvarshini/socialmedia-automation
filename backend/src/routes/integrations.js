@@ -41,16 +41,12 @@ router.get('/:platform', async (req, res) => {
 });
 
 // Disconnect/delete an integration
-router.delete('/:platform', async (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
-    const integration = await Integration.findOneAndUpdate(
-      {
-        userId: req.user._id,
-        platform: req.params.platform,
-      },
-      { isActive: false },
-      { new: true }
-    );
+    const integration = await Integration.findOneAndDelete({
+      _id: req.params.id,
+      userId: req.user._id,
+    });
 
     if (!integration) {
       return res.status(404).json({ error: 'Integration not found' });

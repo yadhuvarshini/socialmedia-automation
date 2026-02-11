@@ -25,18 +25,18 @@ export const config = {
   threads: {
     appId: process.env.THREADS_APP_ID,
     appSecret: process.env.THREADS_APP_SECRET,
-    redirectUri: process.env.THREADS_REDIRECT_URI || `${process.env.FRONTEND_URL || 'http://localhost:5173'}/api/auth/integrations/threads/callback`,
+    redirectUri: process.env.THREADS_REDIRECT_URI || `${process.env.FRONTEND_URL || 'https://localhost:5173'}/api/auth/integrations/threads/callback`,
   },
   reddit: {
     clientId: process.env.REDDIT_CLIENT_ID,
     clientSecret: process.env.REDDIT_CLIENT_SECRET,
-    redirectUri: process.env.REDDIT_REDIRECT_URI || `${process.env.FRONTEND_URL || 'http://localhost:5173'}/api/auth/integrations/reddit/callback`,
+    redirectUri: process.env.REDDIT_REDIRECT_URI || `${process.env.FRONTEND_URL || 'https://localhost:5173'}/api/auth/integrations/reddit/callback`,
     userAgent: process.env.REDDIT_USER_AGENT || 'web:blazly:v1.0.0 (by /u/blazly)',
   },
   instagram: {
     appId: process.env.INSTAGRAM_APP_ID || process.env.FACEBOOK_APP_ID,
     appSecret: process.env.INSTAGRAM_APP_SECRET || process.env.FACEBOOK_APP_SECRET,
-    redirectUri: process.env.INSTAGRAM_REDIRECT_URI || `${process.env.FRONTEND_URL || 'http://localhost:5173'}/api/auth/integrations/instagram/callback`,
+    redirectUri: process.env.INSTAGRAM_REDIRECT_URI || `${process.env.FRONTEND_URL || 'https://localhost:5173'}/api/auth/integrations/instagram/callback`,
   },
   rateLimit: {
     appDailyLimit: parseInt(process.env.LINKEDIN_APP_DAILY_LIMIT || '100', 10),

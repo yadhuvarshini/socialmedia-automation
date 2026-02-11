@@ -575,7 +575,7 @@ router.get('/instagram', (req, res) => {
     client_id: config.instagram.appId,
     redirect_uri: config.instagram.redirectUri,
     state,
-    scope: 'public_profile,email,pages_show_list,instagram_basic,instagram_content_publish',
+    scope: 'public_profile,email,pages_show_list,pages_read_engagement,instagram_basic,instagram_content_publish',
     response_type: 'code',
   });
 
