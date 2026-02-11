@@ -8,7 +8,7 @@ import { createPost as createFacebookPost } from '../services/facebook.js';
 import { createPost as createTwitterPost } from '../services/twitter.js';
 import { createPost as createThreadsPost } from '../services/threads.js';
 import { createPost as createRedditPost, refreshAccessToken as refreshRedditToken } from '../services/reddit.js';
-import { createPost as createInstagramPost } from '../services/instagram.js';
+import { createPost as createInstagramPost, createInstagramMediaContainer, publishInstagramMedia, getInstagramPublishingLimit } from '../services/instagram.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -289,6 +289,268 @@ router.delete('/:id', async (req, res) => {
   if (!post) return res.status(404).json({ error: 'Post not found' });
   await Post.deleteOne({ _id: post._id });
   res.json({ ok: true });
+});
+
+// POST /posts/image - Publish image to Instagram
+router.post('/image', async (req, res) => {
+  try {
+    const { content, imageUrl, platforms } = req.body;
+    const userId = req.user._id;
+
+    if (!imageUrl || !platforms || platforms.length === 0) {
+      return res.status(400).json({ error: 'imageUrl and platforms are required' });
+    }
+
+    // Validate that imageUrl is a proper HTTPS URL (not data URL or localhost)
+    if (imageUrl.startsWith('data:') || imageUrl.includes('localhost') || imageUrl.includes('127.0.0.1')) {
+      return res.status(400).json({ 
+        error: 'Instagram requires publicly accessible HTTPS image URLs. Please upload images to a public server first.' 
+      });
+    }
+
+    const results = {};
+
+    // Handle Instagram posting
+    if (platforms.includes('instagram')) {
+      try {
+        const integration = await Integration.findOne({ userId, platform: 'instagram' });
+        if (!integration) {
+          results.instagram = { success: false, error: 'Instagram not connected' };
+        } else {
+          // Check rate limit
+          const limit = await getInstagramPublishingLimit(integration.platformUserId, integration.accessToken);
+          if (limit.quota_used >= 100) {
+            results.instagram = { success: false, error: 'Rate limit exceeded (100 posts per 24 hours)' };
+          } else {
+            // Create media container
+            const container = await createInstagramMediaContainer(
+              integration.platformUserId,
+              integration.accessToken,
+              {
+                image_url: imageUrl,
+                caption: content || '',
+                media_type: 'IMAGE'
+              }
+            );
+
+            console.log('Container response:', { container, error: container?.error });
+            if (!container || !container.id) {
+              results.instagram = { success: false, error: container?.error || 'Failed to create media container' };
+            } else {
+              // Publish media
+              const published = await publishInstagramMedia(
+                integration.platformUserId,
+                integration.accessToken,
+                container.id
+              );
+
+              console.log('Publish response:', { published, error: published?.error });
+              if (published && published.media_id) {
+                // Save to database
+                const post = new Post({
+                  userId,
+                  content,
+                  platforms: ['instagram'],
+                  imageUrl,
+                  platformPostIds: { instagram: published.media_id },
+                  status: 'published'
+                });
+                await post.save();
+                results.instagram = { success: true, postId: published.media_id };
+              } else {
+                results.instagram = { success: false, error: published?.error || 'Failed to publish media' };
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Instagram image publishing error:', error.message);
+        results.instagram = { success: false, error: error.message };
+      }
+    }
+
+    res.json(results);
+  } catch (error) {
+    console.error('Image publishing error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /posts/video - Publish video to Instagram
+router.post('/video', async (req, res) => {
+  try {
+    const { content, videoUrl, platforms, mediaType } = req.body;
+    const userId = req.user._id;
+
+    if (!videoUrl || !platforms || platforms.length === 0) {
+      return res.status(400).json({ error: 'videoUrl and platforms are required' });
+    }
+
+    const results = {};
+
+    // Handle Instagram posting
+    if (platforms.includes('instagram')) {
+      try {
+        const integration = await Integration.findOne({ userId, platform: 'instagram' });
+        if (!integration) {
+          results.instagram = { success: false, error: 'Instagram not connected' };
+        } else {
+          // Check rate limit
+          const limit = await getInstagramPublishingLimit(integration.platformUserId, integration.accessToken);
+          if (limit.quota_used >= 100) {
+            results.instagram = { success: false, error: 'Rate limit exceeded (100 posts per 24 hours)' };
+          } else {
+            // Determine media type (VIDEO or REELS)
+            const instagramMediaType = mediaType || 'VIDEO';
+
+            // Create media container
+            const container = await createInstagramMediaContainer(
+              integration.platformUserId,
+              integration.accessToken,
+              {
+                video_url: videoUrl,
+                caption: content || '',
+                media_type: instagramMediaType
+              }
+            );
+
+            if (!container || !container.id) {
+              results.instagram = { success: false, error: 'Failed to create media container' };
+            } else {
+              // Publish media
+              const published = await publishInstagramMedia(
+                integration.platformUserId,
+                integration.accessToken,
+                container.id
+              );
+
+              if (published && published.media_id) {
+                // Save to database
+                const post = new Post({
+                  userId,
+                  content,
+                  platforms: ['instagram'],
+                  videoUrl,
+                  platformPostIds: { instagram: published.media_id },
+                  status: 'published'
+                });
+                await post.save();
+                results.instagram = { success: true, postId: published.media_id };
+              } else {
+                results.instagram = { success: false, error: 'Failed to publish media' };
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Instagram video publishing error:', error.message);
+        results.instagram = { success: false, error: error.message };
+      }
+    }
+
+    res.json(results);
+  } catch (error) {
+    console.error('Video publishing error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /posts/carousel - Publish carousel to Instagram
+router.post('/carousel', async (req, res) => {
+  try {
+    const { content, mediaItems, platforms } = req.body;
+    const userId = req.user._id;
+
+    if (!mediaItems || !Array.isArray(mediaItems) || mediaItems.length < 2 || !platforms || platforms.length === 0) {
+      return res.status(400).json({ error: 'At least 2 mediaItems and platforms are required' });
+    }
+
+    const results = {};
+
+    // Handle Instagram posting
+    if (platforms.includes('instagram')) {
+      try {
+        const integration = await Integration.findOne({ userId, platform: 'instagram' });
+        if (!integration) {
+          results.instagram = { success: false, error: 'Instagram not connected' };
+        } else {
+          // Check rate limit
+          const limit = await getInstagramPublishingLimit(integration.platformUserId, integration.accessToken);
+          if (limit.quota_used >= 100) {
+            results.instagram = { success: false, error: 'Rate limit exceeded (100 posts per 24 hours)' };
+          } else {
+            // Create containers for each media item
+            const children = [];
+            for (const media of mediaItems) {
+              const container = await createInstagramMediaContainer(
+                integration.platformUserId,
+                integration.accessToken,
+                {
+                  image_url: media.imageUrl,
+                  video_url: media.videoUrl,
+                  media_type: media.type || 'IMAGE'
+                }
+              );
+
+              if (container && container.id) {
+                children.push(container.id);
+              }
+            }
+
+            if (children.length === 0) {
+              results.instagram = { success: false, error: 'Failed to create media containers' };
+            } else {
+              // Create carousel container
+              const carousel = await createInstagramMediaContainer(
+                integration.platformUserId,
+                integration.accessToken,
+                {
+                  media_type: 'CAROUSEL',
+                  children: children,
+                  caption: content || ''
+                }
+              );
+
+              if (!carousel || !carousel.id) {
+                results.instagram = { success: false, error: 'Failed to create carousel container' };
+              } else {
+                // Publish carousel
+                const published = await publishInstagramMedia(
+                  integration.platformUserId,
+                  integration.accessToken,
+                  carousel.id
+                );
+
+                if (published && published.media_id) {
+                  // Save to database
+                  const post = new Post({
+                    userId,
+                    content,
+                    platforms: ['instagram'],
+                    mediaItems,
+                    platformPostIds: { instagram: published.media_id },
+                    status: 'published'
+                  });
+                  await post.save();
+                  results.instagram = { success: true, postId: published.media_id };
+                } else {
+                  results.instagram = { success: false, error: 'Failed to publish carousel' };
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Instagram carousel publishing error:', error.message);
+        results.instagram = { success: false, error: error.message };
+      }
+    }
+
+    res.json(results);
+  } catch (error) {
+    console.error('Carousel publishing error:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 export default router;

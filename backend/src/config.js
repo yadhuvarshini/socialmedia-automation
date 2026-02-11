@@ -34,8 +34,8 @@ export const config = {
     userAgent: process.env.REDDIT_USER_AGENT || 'web:blazly:v1.0.0 (by /u/blazly)',
   },
   instagram: {
-    appId: process.env.INSTAGRAM_APP_ID || process.env.FACEBOOK_APP_ID,
-    appSecret: process.env.INSTAGRAM_APP_SECRET || process.env.FACEBOOK_APP_SECRET,
+    appId: process.env.INSTAGRAM_LOGIN_APP_ID || '947447064275574',
+    appSecret: process.env.INSTAGRAM_LOGIN_APP_SECRET || '8f6090753f492441e74755d4e4c20c9e',
     redirectUri: process.env.INSTAGRAM_REDIRECT_URI || `${process.env.FRONTEND_URL || 'https://localhost:5173'}/api/auth/integrations/instagram/callback`,
   },
   rateLimit: {

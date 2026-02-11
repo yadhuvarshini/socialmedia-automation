@@ -9,7 +9,7 @@ import { verifyFacebookToken, getPages, exchangeToken } from '../services/facebo
 import { getRequestToken, getAccessToken, verifyTwitterCredentials } from '../services/twitter.js';
 import { exchangeCodeForToken, getThreadsUser } from '../services/threads.js';
 import { exchangeCodeForToken as exchangeRedditCode, getRedditUser, getUserSubreddits } from '../services/reddit.js';
-import { exchangeCodeForToken as exchangeInstagramCode, exchangeForLongLivedToken, getFacebookUser, getPagesWithInstagram, getInstagramAccount } from '../services/instagram.js';
+import { exchangeCodeForToken as exchangeInstagramCode, exchangeForLongLivedToken, getFacebookUser, getPagesWithInstagram, getInstagramAccount, exchangeInstagramLoginCode } from '../services/instagram.js';
 
 const router = Router();
 const { linkedin, frontendUrl } = config;
@@ -564,7 +564,7 @@ router.post('/reddit/select-subreddit', requireAuth, async (req, res) => {
   }
 });
 
-// Instagram Integration
+// Instagram Direct Login
 router.get('/instagram', (req, res) => {
   const state = uuidv4();
   req.session = req.session || {};
@@ -572,18 +572,21 @@ router.get('/instagram', (req, res) => {
   req.session.instagramUserId = req.user._id.toString();
 
   const params = new URLSearchParams({
+    force_reauth: 'true',
     client_id: config.instagram.appId,
     redirect_uri: config.instagram.redirectUri,
-    state,
-    scope: 'public_profile,email,pages_show_list,pages_read_engagement,instagram_basic,instagram_content_publish',
     response_type: 'code',
+    scope: 'instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights',
+    state,
   });
 
-  res.redirect(`https://www.facebook.com/v18.0/dialog/oauth?${params}`);
+  res.redirect(`https://www.instagram.com/oauth/authorize?${params}`);
 });
 
 router.get('/instagram/callback', async (req, res) => {
   const { code, state, error, error_reason } = req.query;
+
+  console.log('Instagram callback received:', { code: code?.substring(0, 20) + '...', state, error });
 
   if (error) {
     return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(error_reason || error)}`);
@@ -592,7 +595,12 @@ router.get('/instagram/callback', async (req, res) => {
   const savedState = req.session?.instagramOAuthState;
   const savedUserId = req.session?.instagramUserId;
   if (!savedState || savedState !== state || !savedUserId) {
-    return res.status(401).send('Invalid state');
+    console.error('Instagram callback state mismatch:', { 
+      savedState, 
+      receivedState: state, 
+      hasSession: !!req.session 
+    });
+    return res.status(401).send('Invalid state - session data was lost. Please try logging in again.');
   }
 
   if (!code) {
@@ -600,90 +608,30 @@ router.get('/instagram/callback', async (req, res) => {
   }
 
   try {
-    const tokenResult = await exchangeInstagramCode(code, config.instagram.redirectUri);
+    console.log('Exchanging Instagram token with redirectUri:', config.instagram.redirectUri);
+    const tokenResult = await exchangeInstagramLoginCode(code, config.instagram.redirectUri);
 
     if (tokenResult.error) {
       return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(tokenResult.error)}`);
     }
 
-    // Exchange for long-lived token
-    const longLivedResult = await exchangeForLongLivedToken(tokenResult.access_token);
-    const accessToken = longLivedResult.access_token || tokenResult.access_token;
-    const expiresIn = longLivedResult.expires_in || tokenResult.expires_in || 5184000;
+    const accessToken = tokenResult.access_token;
+    const instagramUserId = tokenResult.user_id;
+    const permissions = tokenResult.permissions || '';
 
-    // Get Facebook user profile
-    const fbUser = await getFacebookUser(accessToken);
-    if (fbUser.error) {
-      return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(fbUser.error)}`);
-    }
+    console.log('Token exchange successful:', { instagramUserId, permissions });
 
-    // Get pages with Instagram accounts
-    const pages = await getPagesWithInstagram(accessToken);
-
-    if (pages.length === 0) {
-      return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent('No Instagram Business accounts found. Please connect an Instagram Business/Creator account to a Facebook Page first.')}`);
-    }
-
-    req.session.instagramAccessToken = accessToken;
-    req.session.instagramFbUser = fbUser;
-    req.session.instagramPages = pages;
-    req.session.instagramTokenExpiresAt = new Date(Date.now() + expiresIn * 1000);
-    req.session.instagramUserId = savedUserId;
-    delete req.session.instagramOAuthState;
-
-    req.session.save(() => {
-      res.redirect(`${frontendUrl}/integrations/instagram/select-account`);
-    });
-  } catch (err) {
-    const msg = err.response?.data?.error?.message || err.message;
-    res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(msg)}`);
-  }
-});
-
-router.get('/instagram/accounts', requireAuth, (req, res) => {
-  if (!req.session.instagramPages) {
-    return res.status(401).json({ error: 'No Instagram session found. Please sign in again.' });
-  }
-  res.json({ pages: req.session.instagramPages });
-});
-
-router.post('/instagram/select-account', requireAuth, async (req, res) => {
-  const { pageId } = req.body;
-  const savedUserId = req.session?.instagramUserId;
-
-  if (!req.session.instagramAccessToken || !savedUserId) {
-    return res.status(401).json({ error: 'No Instagram session found. Please sign in again.' });
-  }
-
-  if (!pageId) {
-    return res.status(400).json({ error: 'Page ID is required' });
-  }
-
-  const pages = req.session.instagramPages || [];
-  const selectedPage = pages.find((p) => p.id === pageId);
-
-  if (!selectedPage || !selectedPage.instagram_business_account) {
-    return res.status(400).json({ error: 'Page not found or no Instagram account linked' });
-  }
-
-  try {
-    const igAccount = selectedPage.instagram_business_account;
-    const igInfo = await getInstagramAccount(selectedPage.access_token, igAccount.id);
-
+    // Create or update Instagram integration
     const integrationData = {
       userId: savedUserId,
       platform: 'instagram',
-      platformUserId: igAccount.id,
-      platformUsername: igInfo.username || igAccount.username,
-      accessToken: req.session.instagramAccessToken,
-      tokenExpiresAt: req.session.instagramTokenExpiresAt,
-      instagramBusinessAccountId: igAccount.id,
-      instagramPageId: selectedPage.id,
-      instagramPageAccessToken: selectedPage.access_token,
+      platformUserId: instagramUserId,
+      platformUsername: `instagram_user_${instagramUserId}`,
+      accessToken,
+      tokenExpiresAt: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000), // 60 days
       profile: {
-        name: igInfo.username || igAccount.username || 'Instagram User',
-        username: igInfo.username || igAccount.username,
-        profilePicture: igInfo.profile_picture_url || igAccount.profile_picture_url,
+        name: instagramUserId,
+        username: `instagram_user_${instagramUserId}`,
       },
       isActive: true,
       lastUsedAt: new Date(),
@@ -695,18 +643,21 @@ router.post('/instagram/select-account', requireAuth, async (req, res) => {
       { upsert: true, new: true }
     );
 
-    delete req.session.instagramAccessToken;
-    delete req.session.instagramFbUser;
-    delete req.session.instagramPages;
-    delete req.session.instagramTokenExpiresAt;
+    delete req.session.instagramOAuthState;
     delete req.session.instagramUserId;
 
-    req.session.save(() => {
-      res.json({ ok: true });
+    req.session.save((err) => {
+      if (err) {
+        console.error('Instagram Login session save error:', err);
+        return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent('Session save failed: ' + err.message)}`);
+      }
+      console.log('Instagram integration successful');
+      res.redirect(`${frontendUrl}/home?integration=instagram&status=connected`);
     });
   } catch (err) {
-    console.error('Instagram Account Selection Error:', err);
-    res.status(500).json({ error: 'Internal server error: ' + err.message });
+    console.error('Instagram callback error:', err);
+    const msg = err.response?.data?.error?.message || err.message;
+    res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(msg)}`);
   }
 });
 

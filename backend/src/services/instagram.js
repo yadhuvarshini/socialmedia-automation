@@ -234,3 +234,244 @@ export async function createTextPost(pageAccessToken, igAccountId, text) {
     error: 'Instagram requires an image for feed posts. Text-only posts are not supported via the Instagram Graph API.',
   };
 }
+
+/**
+ * Exchange authorization code for Instagram Business Account access token (Direct Instagram Login)
+ * @param {string} code - Authorization code from OAuth callback
+ * @param {string} redirectUri - Redirect URI used in the auth request
+ * @returns {Promise<{ access_token?: string, user_id?: string, permissions?: string, error?: string }>}
+ */
+export async function exchangeInstagramLoginCode(code, redirectUri) {
+  try {
+    console.log('Instagram token exchange:', {
+      client_id: config.instagram.appId,
+      redirect_uri: redirectUri,
+      code: code.substring(0, 20) + '...',
+    });
+
+    // Step 1: Exchange code for short-lived token
+    const response = await axios.post(
+      'https://api.instagram.com/oauth/access_token',
+      new URLSearchParams({
+        client_id: config.instagram.appId,
+        client_secret: config.instagram.appSecret,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
+        code,
+      }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
+
+    console.log('Full response from Instagram:', JSON.stringify(response.data, null, 2));
+
+    const data = response.data;
+    
+    // Handle both response formats: wrapped in data array or direct
+    const tokenData = Array.isArray(data.data) ? data.data[0] : data;
+    
+    console.log('Extracted token data:', {
+      has_access_token: !!tokenData?.access_token,
+      user_id: tokenData?.user_id,
+      permissions: tokenData?.permissions,
+    });
+
+    const shortLivedToken = tokenData?.access_token;
+    const user_id = tokenData?.user_id;
+    const permissions = tokenData?.permissions;
+
+    if (!shortLivedToken) {
+      throw new Error(`No access token in response. Response was: ${JSON.stringify(data)}`);
+    }
+
+    // Step 2: Exchange short-lived token for long-lived token (60 days)
+    console.log('Exchanging for long-lived token...');
+    const longLivedResponse = await axios.get('https://graph.instagram.com/access_token', {
+      params: {
+        grant_type: 'ig_exchange_token',
+        client_secret: config.instagram.appSecret,
+        access_token: shortLivedToken,
+      },
+    });
+
+    console.log('Long-lived token received:', {
+      has_access_token: !!longLivedResponse.data.access_token,
+      expires_in: longLivedResponse.data.expires_in,
+    });
+
+    const longLivedToken = longLivedResponse.data.access_token;
+
+    // Step 3: Get Instagram Business Account ID - REQUIRED
+    console.log('Fetching Instagram Business Account ID using /me endpoint...');
+    const meResponse = await axios.get(
+      'https://graph.instagram.com/v18.0/me',
+      {
+        params: {
+          fields: 'id,username,name,ig_user_id',
+          access_token: longLivedToken,
+        },
+      }
+    );
+
+    console.log('Full /me response:', JSON.stringify(meResponse.data, null, 2));
+    
+    const accountId = meResponse.data?.ig_user_id || meResponse.data?.id;
+    if (!accountId) {
+      throw new Error(`Could not get Instagram Business Account ID. Response: ${JSON.stringify(meResponse.data)}`);
+    }
+    
+    console.log('Got Instagram Business Account ID:', accountId);
+
+    // Step 4: Verify token works by checking permissions
+    console.log('Verifying token has required permissions...');
+    const permResponse = await axios.get(
+      `https://graph.instagram.com/v18.0/${accountId}`,
+      {
+        params: {
+          fields: 'username,name',
+          access_token: longLivedToken,
+        },
+      }
+    );
+    
+    console.log('Token verification successful:', {
+      username: permResponse.data?.username,
+      name: permResponse.data?.name,
+    });
+
+    return {
+      access_token: longLivedToken,
+      user_id: accountId,
+      ig_user_id: accountId,
+      permissions,
+    };
+  } catch (err) {
+    const errorData = err.response?.data || {};
+    const msg = errorData.error_message || errorData.error?.message || errorData.error || err.message;
+    console.error('Instagram Login Token Exchange Error:', {
+      status: err.response?.status,
+      error: errorData,
+      message: msg,
+    });
+    return { error: msg };
+  }
+}
+
+/**
+ * Create Instagram media container for images, videos, or carousel
+ * @param {string} instagramUserId - Instagram professional account ID
+ * @param {string} accessToken - Instagram user access token
+ * @param {Object} mediaParams - Media parameters
+ * @returns {Promise<{ id?: string, error?: string }>}
+ */
+export async function createInstagramMediaContainer(instagramUserId, accessToken, mediaParams) {
+  try {
+    console.log('Creating Instagram media container:', {
+      account_id: instagramUserId,
+      media_type: mediaParams.media_type,
+    });
+
+    const { data } = await axios.post(
+      `https://graph.instagram.com/v18.0/${instagramUserId}/media`,
+      mediaParams,
+      {
+        params: { access_token: accessToken },
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+
+    console.log('Media container created:', { container_id: data.id });
+    return { id: data.id, media_id: data.id };
+  } catch (err) {
+    const msg = err.response?.data?.error?.message || err.message;
+    console.error('Instagram Create Media Container Error:', msg);
+    console.error('Full error:', err.response?.data || err.message);
+    return { error: msg };
+  }
+}
+
+/**
+ * Publish Instagram media container
+ * @param {string} instagramUserId - Instagram professional account ID
+ * @param {string} accessToken - Instagram user access token
+ * @param {string} containerId - Media container ID
+ * @returns {Promise<{ media_id?: string, error?: string }>}
+ */
+export async function publishInstagramMedia(instagramUserId, accessToken, containerId) {
+  try {
+    console.log('Publishing Instagram media:', { container_id: containerId });
+
+    const { data } = await axios.post(
+      `https://graph.instagram.com/v18.0/${instagramUserId}/media_publish`,
+      {
+        creation_id: containerId,
+      },
+      {
+        params: { access_token: accessToken },
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+
+    console.log('Media published:', { media_id: data.id });
+    return { media_id: data.id };
+  } catch (err) {
+    const msg = err.response?.data?.error?.message || err.message;
+    console.error('Instagram Publish Media Error:', msg);
+    console.error('Full error:', err.response?.data || err.message);
+    return { error: msg };
+  }
+}
+
+/**
+ * Check Instagram media container publishing status
+ * @param {string} containerId - Media container ID
+ * @param {string} accessToken - Instagram user access token
+ * @returns {Promise<{ status_code?: string, error?: string }>}
+ */
+export async function checkInstagramMediaStatus(containerId, accessToken) {
+  try {
+    const { data } = await axios.get(
+      `https://graph.instagram.com/v18.0/${containerId}`,
+      {
+        params: {
+          fields: 'status_code',
+          access_token: accessToken,
+        },
+      }
+    );
+
+    return { status_code: data.status_code };
+  } catch (err) {
+    const msg = err.response?.data?.error?.message || err.message;
+    console.error('Instagram Check Media Status Error:', msg);
+    return { error: msg };
+  }
+}
+
+/**
+ * Get Instagram publishing rate limit usage
+ * @param {string} instagramUserId - Instagram professional account ID
+ * @param {string} accessToken - Instagram user access token
+ * @returns {Promise<{ quota_used?: number, quota_total?: number, error?: string }>}
+ */
+export async function getInstagramPublishingLimit(instagramUserId, accessToken) {
+  try {
+    const { data } = await axios.get(
+      `https://graph.instagram.com/v18.0/${instagramUserId}/content_publishing_limit`,
+      {
+        params: { access_token: accessToken },
+      }
+    );
+
+    // Handle both response formats
+    const limitData = data.data?.[0] || data;
+    return {
+      quota_used: limitData?.quota_usage || 0,
+      quota_total: limitData?.quota_total || 100,
+    };
+  } catch (err) {
+    const msg = err.response?.data?.error?.message || err.message;
+    console.error('Instagram Get Publishing Limit Error:', msg);
+    return { quota_used: 0, quota_total: 100 };
+  }
+}
+

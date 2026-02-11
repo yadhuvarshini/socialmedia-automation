@@ -154,3 +154,235 @@
   opacity: 0.7;
   cursor: not-allowed;
 }
+
+/* Media tabs */
+.composer__media-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 2px solid var(--border);
+  margin: -24px -24px 0 -24px;
+  padding: 0 24px;
+}
+
+.composer__tab {
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  position: relative;
+  bottom: -2px;
+}
+
+.composer__tab:hover {
+  color: var(--text);
+}
+
+.composer__tab--active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* Upload section */
+.composer__upload-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--bg);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.composer__upload-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 500;
+  gap: 8px;
+}
+
+.composer__url-label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--text);
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+
+.composer__url-input {
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.composer__url-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.composer__add-media-btn {
+  align-self: flex-start;
+  padding: 8px 16px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.composer__add-media-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.composer__add-media-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.composer__file-input {
+  display: none;
+}
+
+.composer__upload-label:hover {
+  opacity: 0.8;
+}
+
+.composer__video-type {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.composer__video-type label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.composer__video-type input[type="radio"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Media preview */
+.composer__media-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.composer__preview-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.composer__preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 12px;
+}
+
+.composer__preview-item {
+  position: relative;
+  aspect-ratio: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.composer__preview-item img,
+.composer__preview-item video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.composer__preview-video {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  position: relative;
+}
+
+.composer__video-placeholder {
+  color: #fff;
+  font-size: 24px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.composer__media-type {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.composer__remove-media {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: background-color 0.15s;
+}
+
+.composer__remove-media:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.composer__remove-media:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Info text */
+.composer__info-text {
+  margin: 8px 0 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
