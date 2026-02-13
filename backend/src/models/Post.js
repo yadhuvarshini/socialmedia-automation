@@ -16,6 +16,10 @@ const postSchema = new mongoose.Schema(
     linkedinPostUrn: { type: String },
     // New multi-platform fields
     platforms: [{ type: String, enum: ['linkedin', 'facebook', 'twitter', 'threads', 'reddit', 'instagram'] }],
+    mediaType: { type: String, enum: ['text', 'image', 'video', 'carousel'], default: 'text' },
+    imageUrl: { type: String },
+    videoUrl: { type: String },
+    mediaItems: [{ type: { type: String }, url: String }],
     platformIds: { type: Map, of: String }, // Map of platform -> post ID
     platformUrls: { type: Map, of: String }, // Map of platform -> post URL
     errors: [{ platform: String, error: String }],

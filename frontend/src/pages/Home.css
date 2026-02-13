@@ -110,8 +110,15 @@
 }
 
 .home__integration:hover {
-    background: rgba(0, 0, 0, 0.04);
-    border-color: rgba(0, 0, 0, 0.1);
+    background: rgba(102, 126, 234, 0.08);
+    border-color: rgba(102, 126, 234, 0.3);
+    transform: translateX(4px);
+}
+
+.home__integration--selected {
+    background: rgba(102, 126, 234, 0.12) !important;
+    border-color: #667eea !important;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
 }
 
 .home__integration--connected {
@@ -228,6 +235,16 @@
     color: #e53e3e;
 }
 
+.home__integration-connect-indicator {
+    color: #cbd5e0;
+    transition: all 0.2s ease;
+}
+
+.home__integration:hover .home__integration-connect-indicator {
+    color: #667eea;
+    transform: scale(1.1);
+}
+
 .home__main {
     flex: 1;
     padding: 40px;
@@ -246,11 +263,27 @@
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
 }
 
+.home__posts-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+}
+
 .home__section-title {
     font-size: 24px;
     font-weight: 700;
     color: #2d3748;
-    margin: 0 0 20px 0;
+    margin: 0;
+}
+
+.home__posts-count {
+    font-size: 14px;
+    font-weight: 600;
+    color: #718096;
+    background: #edf2f7;
+    padding: 4px 12px;
+    border-radius: 99px;
 }
 
 .home__loading {
@@ -268,4 +301,49 @@
     .home__main {
         padding: 20px;
     }
+}
+.home__load-more {
+    display: block;
+    width: 200px;
+    margin: 32px auto 0;
+    padding: 12px;
+    background: white;
+    border: 2px solid #667eea;
+    color: #667eea;
+    border-radius: 12px;
+    font-weight: 700;
+    font-size: 15px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.home__load-more:hover:not(:disabled) {
+    background: #667eea;
+    color: white;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.home__load-more:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    border-color: #cbd5e0;
+    color: #cbd5e0;
+}
+
+/* Empty State Styles */
+.post-list__empty-container {
+    text-align: center;
+    padding: 60px 20px;
+}
+
+.post-list__empty {
+    font-size: 20px;
+    font-weight: 700;
+    color: #2d3748;
+    margin-bottom: 8px;
+}
+
+.post-list__empty-sub {
+    font-size: 15px;
+    color: #718096;
 }
