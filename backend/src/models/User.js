@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 const userSchema = new mongoose.Schema(
   {
     email: { type: String, unique: true, sparse: true },
+    firebaseUid: { type: String, unique: true, sparse: true, index: true },
     password: { type: String }, // For application auth (if needed)
     profile: {
       firstName: String,

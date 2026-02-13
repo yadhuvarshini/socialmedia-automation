@@ -22,7 +22,7 @@ router.get('/linkedin', (req, res) => {
   const state = uuidv4();
   req.session = req.session || {};
   req.session.linkedinOAuthState = state;
-  req.session.linkedinUserId = req.user._id.toString();
+  req.session.linkedinUserId = req.user._id; // Use MongoDB _id
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: linkedin.clientId,
@@ -86,6 +86,7 @@ router.get('/linkedin/callback', async (req, res) => {
       lastUsedAt: new Date(),
     };
 
+    // Find and update or create integration in MongoDB
     await Integration.findOneAndUpdate(
       { userId: savedUserId, platform: 'linkedin' },
       integrationData,
@@ -108,7 +109,7 @@ router.get('/facebook', (req, res) => {
   const state = uuidv4();
   req.session = req.session || {};
   req.session.facebookOAuthState = state;
-  req.session.facebookUserId = req.user._id.toString();
+  req.session.facebookUserId = req.user._id;
 
   const params = new URLSearchParams({
     client_id: config.facebook.appId,
@@ -174,7 +175,7 @@ router.get('/facebook/callback', async (req, res) => {
     });
   } catch (err) {
     const msg = err.response?.data?.error?.message || err.message;
-    res.redirect(`${frontendUrl}/integrations?error=${encodeURIComponent(msg)}`);
+    res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(msg)}`);
   }
 });
 
@@ -227,6 +228,7 @@ router.post('/facebook/select-page', requireAuth, async (req, res) => {
       lastUsedAt: new Date(),
     };
 
+    // Find and update or create integration in MongoDB
     await Integration.findOneAndUpdate(
       { userId: savedUserId, platform: 'facebook' },
       integrationData,
@@ -255,7 +257,7 @@ router.get('/twitter', async (req, res) => {
     const state = uuidv4();
     req.session = req.session || {};
     req.session.twitterOAuthState = state;
-    req.session.twitterUserId = req.user._id.toString();
+    req.session.twitterUserId = req.user._id;
 
     const callbackUrl = `${frontendUrl}/api/auth/integrations/twitter/callback`;
     const result = await getRequestToken(callbackUrl);
@@ -322,6 +324,7 @@ router.get('/twitter/callback', async (req, res) => {
       lastUsedAt: new Date(),
     };
 
+    // Find and update or create integration in MongoDB
     await Integration.findOneAndUpdate(
       { userId: savedUserId, platform: 'twitter' },
       integrationData,
@@ -346,7 +349,7 @@ router.get('/threads', (req, res) => {
   const state = uuidv4();
   req.session = req.session || {};
   req.session.threadsOAuthState = state;
-  req.session.threadsUserId = req.user._id.toString();
+  req.session.threadsUserId = req.user._id;
 
   const params = new URLSearchParams({
     client_id: config.threads.appId,
@@ -408,6 +411,7 @@ router.get('/threads/callback', async (req, res) => {
       lastUsedAt: new Date(),
     };
 
+    // Find and update or create integration in MongoDB
     await Integration.findOneAndUpdate(
       { userId: savedUserId, platform: 'threads' },
       integrationData,
@@ -431,7 +435,7 @@ router.get('/reddit', (req, res) => {
   const state = uuidv4();
   req.session = req.session || {};
   req.session.redditOAuthState = state;
-  req.session.redditUserId = req.user._id.toString();
+  req.session.redditUserId = req.user._id;
 
   const params = new URLSearchParams({
     client_id: config.reddit.clientId,
@@ -542,6 +546,7 @@ router.post('/reddit/select-subreddit', requireAuth, async (req, res) => {
       lastUsedAt: new Date(),
     };
 
+    // Find and update or create integration in MongoDB
     await Integration.findOneAndUpdate(
       { userId: savedUserId, platform: 'reddit' },
       integrationData,
@@ -569,7 +574,7 @@ router.get('/instagram', (req, res) => {
   const state = uuidv4();
   req.session = req.session || {};
   req.session.instagramOAuthState = state;
-  req.session.instagramUserId = req.user._id.toString();
+  req.session.instagramUserId = req.user._id;
 
   const params = new URLSearchParams({
     force_reauth: 'true',
@@ -595,10 +600,10 @@ router.get('/instagram/callback', async (req, res) => {
   const savedState = req.session?.instagramOAuthState;
   const savedUserId = req.session?.instagramUserId;
   if (!savedState || savedState !== state || !savedUserId) {
-    console.error('Instagram callback state mismatch:', { 
-      savedState, 
-      receivedState: state, 
-      hasSession: !!req.session 
+    console.error('Instagram callback state mismatch:', {
+      savedState,
+      receivedState: state,
+      hasSession: !!req.session
     });
     return res.status(401).send('Invalid state - session data was lost. Please try logging in again.');
   }
@@ -637,6 +642,7 @@ router.get('/instagram/callback', async (req, res) => {
       lastUsedAt: new Date(),
     };
 
+    // Find and update or create integration in MongoDB
     await Integration.findOneAndUpdate(
       { userId: savedUserId, platform: 'instagram' },
       integrationData,

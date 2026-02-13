@@ -1,24 +1,50 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth, api } from '../hooks/useAuth';
-import PostComposer from '../components/PostComposer';
 import PostList from '../components/PostList';
 import './Home.css';
+
+// Lazy load the composer
+const PostComposer = lazy(() => import('../components/PostComposer'));
 
 export default function Home() {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
     const [posts, setPosts] = useState([]);
+    const [totalPosts, setTotalPosts] = useState(0);
+    const [hasMore, setHasMore] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
     const [integrations, setIntegrations] = useState([]);
     const [activeView, setActiveView] = useState('posts');
+    const [selectedPlatform, setSelectedPlatform] = useState(null);
 
-    const loadPosts = () => {
-        api('/posts')
+    const loadPosts = (isLoadMore = false) => {
+        if (isLoadMore) setLoadingMore(true);
+        else setLoading(true);
+
+        const lastPostId = isLoadMore && posts.length > 0 ? posts[posts.length - 1].id : null;
+        const query = lastPostId ? `?startAfter=${lastPostId}&limit=5` : '?limit=5';
+
+        api('/posts' + query)
             .then((r) => r.json())
-            .then(setPosts)
-            .catch(() => setPosts([]))
-            .finally(() => setLoading(false));
+            .then((data) => {
+                if (isLoadMore) {
+                    setPosts(prev => [...prev, ...(data.posts || [])]);
+                } else {
+                    setPosts(data.posts || []);
+                }
+                setTotalPosts(data.total || 0);
+                setHasMore(data.hasMore || false);
+            })
+            .catch((err) => {
+                console.error('Failed to load posts:', err);
+                if (!isLoadMore) setPosts([]);
+            })
+            .finally(() => {
+                setLoading(false);
+                setLoadingMore(false);
+            });
     };
 
     const loadIntegrations = () => {
@@ -29,6 +55,16 @@ export default function Home() {
     };
 
     useEffect(() => {
+        // Handle OAuth errors from URL query params
+        const params = new URLSearchParams(window.location.search);
+        const error = params.get('error');
+        if (error) {
+            alert(`Authentication Error: ${decodeURIComponent(error)}`);
+            // Clean up URL without refreshing
+            const newUrl = window.location.pathname;
+            window.history.replaceState({}, '', newUrl);
+        }
+
         loadPosts();
         loadIntegrations();
     }, []);
@@ -37,8 +73,26 @@ export default function Home() {
         ? [user.profile.firstName, user.profile.lastName].filter(Boolean).join(' ') || 'User'
         : 'User';
 
-    const handleConnectIntegration = (platform) => {
-        window.location.href = `/api/auth/integrations/${platform}`;
+    const handleConnectIntegration = async (platform) => {
+        try {
+            // Fix: Sync session first to avoid "not authenticated" error during redirect
+            await api('/auth/session', { method: 'POST' });
+            window.location.href = `/api/auth/integrations/${platform}`;
+        } catch (err) {
+            console.error('Failed to sync session:', err);
+            alert('Failed to start integration flow. Please try again.');
+        }
+    };
+
+    const handleIntegrationClick = (platform) => {
+        const integration = integrations.find(i => i.platform === platform && i.isActive);
+        if (integration) {
+            setSelectedPlatform(platform);
+            // Scroll to composer
+            document.querySelector('.home__composer')?.scrollIntoView({ behavior: 'smooth' });
+        } else {
+            handleConnectIntegration(platform);
+        }
     };
 
     const handleDisconnectIntegration = async (integrationId) => {
@@ -106,7 +160,6 @@ export default function Home() {
     };
 
     const availablePlatforms = ['linkedin', 'facebook', 'twitter', 'threads', 'reddit', 'instagram'];
-    const connectedPlatforms = integrations.filter(i => i.isActive).map(i => i.platform);
 
     return (
         <div className="home">
@@ -141,7 +194,8 @@ export default function Home() {
                             return (
                                 <div
                                     key={platform}
-                                    className={`home__integration ${isConnected ? 'home__integration--connected' : ''}`}
+                                    className={`home__integration ${isConnected ? 'home__integration--connected' : ''} ${selectedPlatform === platform ? 'home__integration--selected' : ''}`}
+                                    onClick={() => handleIntegrationClick(platform)}
                                 >
                                     <div className="home__integration-icon" style={{ color: platformColors[platform] }}>
                                         {platformIcons[platform]}
@@ -155,7 +209,10 @@ export default function Home() {
                                     {isConnected ? (
                                         <button
                                             className="home__integration-btn home__integration-btn--disconnect"
-                                            onClick={() => handleDisconnectIntegration(integration._id)}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDisconnectIntegration(integration.id);
+                                            }}
                                             title="Disconnect"
                                         >
                                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -164,12 +221,12 @@ export default function Home() {
                                             </svg>
                                         </button>
                                     ) : (
-                                        <button
-                                            className="home__integration-btn home__integration-btn--connect"
-                                            onClick={() => handleConnectIntegration(platform)}
-                                        >
-                                            Connect
-                                        </button>
+                                        <div className="home__integration-connect-indicator">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                <line x1="12" y1="5" x2="12" y2="19" />
+                                                <line x1="5" y1="12" x2="19" y2="12" />
+                                            </svg>
+                                        </div>
                                     )}
                                 </div>
                             );
@@ -200,14 +257,36 @@ export default function Home() {
                 {activeView === 'posts' && (
                     <>
                         <section className="home__composer">
-                            <PostComposer onSuccess={loadPosts} integrations={integrations} />
+                            <Suspense fallback={<div className="home__composer-loading">Loading Composer...</div>}>
+                                <PostComposer
+                                    onSuccess={() => loadPosts(false)}
+                                    integrations={integrations}
+                                    selectedPlatform={selectedPlatform}
+                                    onPlatformChange={setSelectedPlatform}
+                                />
+                            </Suspense>
                         </section>
                         <section className="home__posts">
-                            <h2 className="home__section-title">Your posts</h2>
-                            {loading ? (
+                            <div className="home__posts-header">
+                                <h2 className="home__section-title">Your posts</h2>
+                                <span className="home__posts-count">{totalPosts} total</span>
+                            </div>
+
+                            {loading && !loadingMore ? (
                                 <p className="home__loading">Loading posts…</p>
                             ) : (
-                                <PostList posts={posts} onUpdate={loadPosts} />
+                                <>
+                                    <PostList posts={posts} onUpdate={() => loadPosts(false)} />
+                                    {hasMore && (
+                                        <button
+                                            className="home__load-more"
+                                            onClick={() => loadPosts(true)}
+                                            disabled={loadingMore}
+                                        >
+                                            {loadingMore ? 'Loading more...' : 'Load More'}
+                                        </button>
+                                    )}
+                                </>
                             )}
                         </section>
                     </>

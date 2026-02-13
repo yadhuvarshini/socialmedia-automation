@@ -139,7 +139,7 @@ export async function getInstagramAccount(accessToken, igAccountId) {
  * @param {string} imageUrl - Optional image URL (required by IG API for feed posts)
  * @returns {Promise<{ id?: string, url?: string, error?: string }>}
  */
-export async function createPost(pageAccessToken, igAccountId, caption, imageUrl = '') {
+export async function createPost(pageAccessToken, igAccountId, caption, imageUrl = '', baseUrl = GRAPH_BASE) {
   try {
     if (!igAccountId || !pageAccessToken) {
       return { error: 'Instagram Business Account and page access token are required.' };
@@ -162,7 +162,7 @@ export async function createPost(pageAccessToken, igAccountId, caption, imageUrl
 
     // Step 1: Create media container
     const { data: containerData } = await axios.post(
-      `${GRAPH_BASE}/${igAccountId}/media`,
+      `${baseUrl}/${igAccountId}/media`,
       null,
       {
         params: {
@@ -183,7 +183,7 @@ export async function createPost(pageAccessToken, igAccountId, caption, imageUrl
     await new Promise((resolve) => setTimeout(resolve, 5000));
 
     const { data: publishData } = await axios.post(
-      `${GRAPH_BASE}/${igAccountId}/media_publish`,
+      `${baseUrl}/${igAccountId}/media_publish`,
       null,
       {
         params: {
@@ -201,7 +201,7 @@ export async function createPost(pageAccessToken, igAccountId, caption, imageUrl
 
     // Try to get the permalink
     try {
-      const { data: mediaData } = await axios.get(`${GRAPH_BASE}/${postId}`, {
+      const { data: mediaData } = await axios.get(`${baseUrl}/${postId}`, {
         params: {
           fields: 'permalink',
           access_token: pageAccessToken,
@@ -249,7 +249,7 @@ export async function exchangeInstagramLoginCode(code, redirectUri) {
       code: code.substring(0, 20) + '...',
     });
 
-    // Step 1: Exchange code for short-lived token
+    // Use a custom response transformer to handle potential bigint precision issues with user_id
     const response = await axios.post(
       'https://api.instagram.com/oauth/access_token',
       new URLSearchParams({
@@ -259,24 +259,34 @@ export async function exchangeInstagramLoginCode(code, redirectUri) {
         redirect_uri: redirectUri,
         code,
       }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        transformResponse: [(data) => {
+          // Keep raw data available so we can regex the ID
+          return { raw: data, json: JSON.parse(data) };
+        }]
+      }
     );
 
-    console.log('Full response from Instagram:', JSON.stringify(response.data, null, 2));
+    console.log('Full response from Instagram (raw):', response.data.raw);
 
-    const data = response.data;
-    
+    const data = response.data.json;
+
+    // Extract user_id as string using regex from raw data to avoid precision loss
+    let user_id = null;
+    const userIdMatch = response.data.raw.match(/"user_id":\s*(\d+)/);
+    if (userIdMatch) {
+      user_id = userIdMatch[1];
+    } else {
+      user_id = data.user_id?.toString();
+    }
+
+    console.log('Extracted user_id as string:', user_id);
+
     // Handle both response formats: wrapped in data array or direct
     const tokenData = Array.isArray(data.data) ? data.data[0] : data;
-    
-    console.log('Extracted token data:', {
-      has_access_token: !!tokenData?.access_token,
-      user_id: tokenData?.user_id,
-      permissions: tokenData?.permissions,
-    });
 
     const shortLivedToken = tokenData?.access_token;
-    const user_id = tokenData?.user_id;
     const permissions = tokenData?.permissions;
 
     if (!shortLivedToken) {
@@ -300,48 +310,15 @@ export async function exchangeInstagramLoginCode(code, redirectUri) {
 
     const longLivedToken = longLivedResponse.data.access_token;
 
-    // Step 3: Get Instagram Business Account ID - REQUIRED
-    console.log('Fetching Instagram Business Account ID using /me endpoint...');
-    const meResponse = await axios.get(
-      'https://graph.instagram.com/v18.0/me',
-      {
-        params: {
-          fields: 'id,username,name,ig_user_id',
-          access_token: longLivedToken,
-        },
-      }
-    );
-
-    console.log('Full /me response:', JSON.stringify(meResponse.data, null, 2));
-    
-    const accountId = meResponse.data?.ig_user_id || meResponse.data?.id;
-    if (!accountId) {
-      throw new Error(`Could not get Instagram Business Account ID. Response: ${JSON.stringify(meResponse.data)}`);
-    }
-    
-    console.log('Got Instagram Business Account ID:', accountId);
-
-    // Step 4: Verify token works by checking permissions
-    console.log('Verifying token has required permissions...');
-    const permResponse = await axios.get(
-      `https://graph.instagram.com/v18.0/${accountId}`,
-      {
-        params: {
-          fields: 'username,name',
-          access_token: longLivedToken,
-        },
-      }
-    );
-    
-    console.log('Token verification successful:', {
-      username: permResponse.data?.username,
-      name: permResponse.data?.name,
-    });
+    // Step 3: The user_id from the initial token exchange IS the Instagram Business Account ID
+    // No need to fetch it again - we already have it
+    console.log('Account ID from token exchange:', user_id);
+    console.log('Token exchange complete - ready to publish posts');
 
     return {
       access_token: longLivedToken,
-      user_id: accountId,
-      ig_user_id: accountId,
+      user_id: user_id, // This is the Instagram Business Account ID
+      ig_user_id: user_id,
       permissions,
     };
   } catch (err) {
@@ -361,30 +338,53 @@ export async function exchangeInstagramLoginCode(code, redirectUri) {
  * @param {string} instagramUserId - Instagram professional account ID
  * @param {string} accessToken - Instagram user access token
  * @param {Object} mediaParams - Media parameters
- * @returns {Promise<{ id?: string, error?: string }>}
+ * @returns {Promise<{ id?: string, media_id?: string, error?: string }>}
  */
-export async function createInstagramMediaContainer(instagramUserId, accessToken, mediaParams) {
+export async function createInstagramMediaContainer(instagramUserId, accessToken, mediaParams, baseUrl = 'https://graph.facebook.com/v18.0') {
   try {
     console.log('Creating Instagram media container:', {
       account_id: instagramUserId,
       media_type: mediaParams.media_type,
+      has_image_url: !!mediaParams.image_url,
+      has_video_url: !!mediaParams.video_url,
+      has_caption: !!mediaParams.caption,
+      has_children: !!mediaParams.children,
     });
 
+    // Build the request payload - only include fields that are provided
+    const payload = {};
+    if (mediaParams.media_type) payload.media_type = mediaParams.media_type;
+    if (mediaParams.image_url) payload.image_url = mediaParams.image_url;
+    if (mediaParams.video_url) payload.video_url = mediaParams.video_url;
+    if (mediaParams.caption) payload.caption = mediaParams.caption;
+    if (mediaParams.children) payload.children = mediaParams.children;
+
+    console.log('Media container request payload:', JSON.stringify(payload, null, 2));
+
     const { data } = await axios.post(
-      `https://graph.instagram.com/v18.0/${instagramUserId}/media`,
-      mediaParams,
+      `${baseUrl}/${instagramUserId}/media`,
+      null,
       {
-        params: { access_token: accessToken },
-        headers: { 'Content-Type': 'application/json' },
+        params: {
+          ...payload,
+          access_token: accessToken
+        },
+        headers: { 'Accept': 'application/json' },
       }
     );
 
-    console.log('Media container created:', { container_id: data.id });
+    console.log('Media container created successfully:', { container_id: data.id });
     return { id: data.id, media_id: data.id };
   } catch (err) {
-    const msg = err.response?.data?.error?.message || err.message;
+    const errorData = err.response?.data || {};
+    const msg = errorData.error?.message || err.message;
     console.error('Instagram Create Media Container Error:', msg);
-    console.error('Full error:', err.response?.data || err.message);
+    console.error('Full error details:', {
+      status: err.response?.status,
+      error: errorData,
+      accountId: instagramUserId,
+      mediaType: mediaParams.media_type,
+    });
     return { error: msg };
   }
 }
@@ -396,18 +396,19 @@ export async function createInstagramMediaContainer(instagramUserId, accessToken
  * @param {string} containerId - Media container ID
  * @returns {Promise<{ media_id?: string, error?: string }>}
  */
-export async function publishInstagramMedia(instagramUserId, accessToken, containerId) {
+export async function publishInstagramMedia(instagramUserId, accessToken, containerId, baseUrl = 'https://graph.facebook.com/v18.0') {
   try {
     console.log('Publishing Instagram media:', { container_id: containerId });
 
     const { data } = await axios.post(
-      `https://graph.instagram.com/v18.0/${instagramUserId}/media_publish`,
+      `${baseUrl}/${instagramUserId}/media_publish`,
+      null,
       {
-        creation_id: containerId,
-      },
-      {
-        params: { access_token: accessToken },
-        headers: { 'Content-Type': 'application/json' },
+        params: {
+          creation_id: containerId,
+          access_token: accessToken
+        },
+        headers: { 'Accept': 'application/json' },
       }
     );
 
@@ -427,10 +428,10 @@ export async function publishInstagramMedia(instagramUserId, accessToken, contai
  * @param {string} accessToken - Instagram user access token
  * @returns {Promise<{ status_code?: string, error?: string }>}
  */
-export async function checkInstagramMediaStatus(containerId, accessToken) {
+export async function checkInstagramMediaStatus(containerId, accessToken, baseUrl = 'https://graph.facebook.com/v18.0') {
   try {
     const { data } = await axios.get(
-      `https://graph.instagram.com/v18.0/${containerId}`,
+      `${baseUrl}/${containerId}`,
       {
         params: {
           fields: 'status_code',
@@ -445,6 +446,34 @@ export async function checkInstagramMediaStatus(containerId, accessToken) {
     console.error('Instagram Check Media Status Error:', msg);
     return { error: msg };
   }
+}
+
+/**
+ * Wait for Instagram media container to be ready for publishing
+ * @param {string} containerId 
+ * @param {string} accessToken 
+ * @param {string} baseUrl 
+ * @param {number} maxRetries 
+ * @returns {Promise<{ ready: boolean, error?: string }>}
+ */
+export async function waitForMediaReady(containerId, accessToken, baseUrl = 'https://graph.facebook.com/v18.0', maxRetries = 5) {
+  for (let i = 0; i < maxRetries; i++) {
+    const status = await checkInstagramMediaStatus(containerId, accessToken, baseUrl);
+
+    if (status.status_code === 'FINISHED') {
+      return { ready: true };
+    }
+
+    if (status.status_code === 'ERROR') {
+      return { ready: false, error: 'Media processing failed on Instagram servers.' };
+    }
+
+    // If not ready, wait and try again
+    console.log(`Media not ready (status: ${status.status_code}), retry ${i + 1}/${maxRetries}...`);
+    await new Promise(resolve => setTimeout(resolve, 3000));
+  }
+
+  return { ready: false, error: 'Media processing timed out. Please try publishing again in a moment.' };
 }
 
 /**

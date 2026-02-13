@@ -8,9 +8,11 @@ router.use(requireAuth);
 // Get all integrations for the current user
 router.get('/', async (req, res) => {
   try {
-    const integrations = await Integration.find({ userId: req.user._id, isActive: true })
-      .sort({ platform: 1 })
-      .lean();
+    const integrations = await Integration.find({
+      userId: req.user._id,
+      isActive: true,
+    });
+
     res.json(integrations);
   } catch (err) {
     console.error('Error fetching integrations:', err);
@@ -25,14 +27,18 @@ router.get('/:platform', async (req, res) => {
       userId: req.user._id,
       platform: req.params.platform,
       isActive: true,
-    }).lean();
+    });
 
     if (!integration) {
       return res.status(404).json({ error: 'Integration not found' });
     }
 
     // Don't send sensitive tokens in response
-    const { accessToken, accessTokenSecret, refreshToken, ...safeIntegration } = integration;
+    const safeIntegration = integration.toObject();
+    delete safeIntegration.accessToken;
+    delete safeIntegration.accessTokenSecret;
+    delete safeIntegration.refreshToken;
+
     res.json(safeIntegration);
   } catch (err) {
     console.error('Error fetching integration:', err);
@@ -43,7 +49,7 @@ router.get('/:platform', async (req, res) => {
 // Disconnect/delete an integration
 router.delete('/:id', async (req, res) => {
   try {
-    const integration = await Integration.findOneAndDelete({
+    const integration = await Integration.findOne({
       _id: req.params.id,
       userId: req.user._id,
     });
@@ -51,6 +57,9 @@ router.delete('/:id', async (req, res) => {
     if (!integration) {
       return res.status(404).json({ error: 'Integration not found' });
     }
+
+    integration.isActive = false;
+    await integration.save();
 
     res.json({ ok: true, message: 'Integration disconnected successfully' });
   } catch (err) {

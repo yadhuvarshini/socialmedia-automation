@@ -1,10 +1,10 @@
 import axios from 'axios';
 
 /**
- * Create a text post on LinkedIn (Share on LinkedIn – UGC Post API v2).
- * Uses /v2/ugcPosts so we don't need LinkedIn-Version header (avoids "version not active" errors).
+ * Create a post on LinkedIn (Share on LinkedIn – UGC Post API v2).
+ * Supports both text-only and image-based posts.
  * @param {string} accessToken - Member access token
- * @param {object} payload - { author (urn), commentary (text), visibility }
+ * @param {object} payload - { author (urn), commentary (text), visibility, mediaAsset (opt) }
  * @returns {Promise<{ postUrn?: string, error?: string }>}
  */
 export async function createPost(accessToken, payload) {
@@ -14,7 +14,7 @@ export async function createPost(accessToken, payload) {
     specificContent: {
       'com.linkedin.ugc.ShareContent': {
         shareCommentary: { text: payload.commentary },
-        shareMediaCategory: 'NONE',
+        shareMediaCategory: payload.mediaAsset ? 'IMAGE' : 'NONE',
       },
     },
     visibility: {
@@ -22,6 +22,18 @@ export async function createPost(accessToken, payload) {
         payload.visibility === 'CONNECTIONS' ? 'CONNECTIONS' : 'PUBLIC',
     },
   };
+
+  if (payload.mediaAsset) {
+    body.specificContent['com.linkedin.ugc.ShareContent'].media = [
+      {
+        status: 'READY',
+        description: { text: 'Post image' },
+        media: payload.mediaAsset,
+        title: { text: 'Post image' },
+      },
+    ];
+  }
+
   try {
     const res = await axios.post('https://api.linkedin.com/v2/ugcPosts', body, {
       headers: {
@@ -30,27 +42,103 @@ export async function createPost(accessToken, payload) {
         'X-Restli-Protocol-Version': '2.0.0',
       },
     });
-    /* {
-    "author": "urn:li:person:8675309",
-    "lifecycleState": "PUBLISHED",
-    "specificContent": {
-        "com.linkedin.ugc.ShareContent": {
-            "shareCommentary": {
-                "text": "Hello World! This is my first Share on LinkedIn!"
-            },
-            "shareMediaCategory": "NONE"
-        }
-    },
-    "visibility": {
-        "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"
-    }
-} */
     const postUrn = res.headers?.['x-restli-id'] || res.data?.id;
     return { postUrn: postUrn || 'unknown' };
   } catch (err) {
     const message = err.response?.data?.message || err.message;
     const status = err.response?.status;
     return { error: message, status };
+  }
+}
+
+/**
+ * Register an image upload with LinkedIn
+ * @param {string} accessToken 
+ * @param {string} authorUrn 
+ * @returns {Promise<{ uploadUrl: string, asset: string, error?: string }>}
+ */
+export async function registerImage(accessToken, authorUrn) {
+  const body = {
+    registerUploadRequest: {
+      recipes: ['urn:li:digitalmediaRecipe:feedshare-image'],
+      owner: authorUrn,
+      serviceRelationships: [
+        {
+          relationshipType: 'OWNER',
+          identifier: 'urn:li:userGeneratedContent',
+        },
+      ],
+    },
+  };
+
+  try {
+    const res = await axios.post('https://api.linkedin.com/v2/assets?action=registerUpload', body, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const uploadUrl = res.data.value.uploadMechanism['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest'].uploadUrl;
+    const asset = res.data.value.asset;
+
+    return { uploadUrl, asset };
+  } catch (err) {
+    const msg = err.response?.data?.message || err.message;
+    console.error('LinkedIn Image Registration Error:', msg);
+    return { error: msg };
+  }
+}
+
+/**
+ * Upload image binary to LinkedIn
+ * @param {string} uploadUrl 
+ * @param {string} imageUrl - Remote image URL (e.g. Firebase)
+ * @returns {Promise<{ success: boolean, error?: string }>}
+ */
+export async function uploadImage(uploadUrl, imageUrl) {
+  try {
+    // 1. Download image from URL
+    const imageRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+    const buffer = Buffer.from(imageRes.data, 'binary');
+
+    // 2. Upload to LinkedIn
+    await axios.put(uploadUrl, buffer, {
+      headers: {
+        'Content-Type': imageRes.headers['content-type'] || 'image/jpeg',
+      },
+    });
+
+    return { success: true };
+  } catch (err) {
+    const msg = err.response?.data?.message || err.message;
+    console.error('LinkedIn Image Binary Upload Error:', msg);
+    return { success: false, error: msg };
+  }
+}
+
+/**
+ * High-level function to create an image post on LinkedIn
+ */
+export async function createPostWithImage(accessToken, authorUrn, commentary, imageUrl, visibility = 'PUBLIC') {
+  try {
+    // Step 1: Register
+    const reg = await registerImage(accessToken, authorUrn);
+    if (reg.error) return { error: reg.error };
+
+    // Step 2: Upload
+    const upload = await uploadImage(reg.uploadUrl, imageUrl);
+    if (!upload.success) return { error: upload.error };
+
+    // Step 3: Create Post
+    return await createPost(accessToken, {
+      author: authorUrn,
+      commentary,
+      visibility,
+      mediaAsset: reg.asset,
+    });
+  } catch (err) {
+    return { error: err.message };
   }
 }
 

@@ -46,4 +46,5 @@ export const config = {
     secret: process.env.SESSION_SECRET || 'blazly-session-secret-change-in-production',
     cookieMaxAge: 60 * 60 * 24 * 7, // 7 days
   },
+  firebaseServiceAccount: process.env.FIREBASE_SERVICE_ACCOUNT,
 };

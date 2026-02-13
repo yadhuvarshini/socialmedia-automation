@@ -25,41 +25,49 @@ export default function PostList({ posts, onUpdate }) {
     if (!window.confirm('Delete this post?')) return;
     api(`/posts/${id}`, { method: 'DELETE' })
       .then((r) => r.ok && onUpdate?.())
-      .catch(() => {});
+      .catch(() => { });
   };
 
   if (!posts?.length) {
-    return <p className="post-list__empty">No posts yet. Create one above.</p>;
+    return (
+      <div className="post-list__empty-container">
+        <p className="post-list__empty">0 posts so far</p>
+        <p className="post-list__empty-sub">Create your first post above to get started!</p>
+      </div>
+    );
   }
 
   return (
     <ul className="post-list">
-      {posts.map((post) => (
-        <li key={post._id} className="post-list__item">
-          <p className="post-list__content">{post.content}</p>
-          <div className="post-list__meta">
-            <span className={`post-list__status post-list__status--${statusClass(post.status)}`}>
-              {statusLabel(post.status)}
-            </span>
-            {post.scheduledAt && post.status === 'scheduled' && (
-              <span className="post-list__date">Scheduled: {formatDate(post.scheduledAt)}</span>
+      {posts.map((post) => {
+        if (!post || !post.id) return null;
+        return (
+          <li key={post.id} className="post-list__item">
+            <p className="post-list__content">{post.content || '(No content)'}</p>
+            <div className="post-list__meta">
+              <span className={`post-list__status post-list__status--${statusClass(post.status)}`}>
+                {statusLabel(post.status)}
+              </span>
+              {post.scheduledAt && post.status === 'scheduled' && (
+                <span className="post-list__date">Scheduled: {formatDate(post.scheduledAt)}</span>
+              )}
+              {post.publishedAt && (
+                <span className="post-list__date">Published: {formatDate(post.publishedAt)}</span>
+              )}
+            </div>
+            {post.error && <p className="post-list__error">{post.error}</p>}
+            {(post.status === 'draft' || post.status === 'scheduled') && (
+              <button
+                type="button"
+                className="post-list__delete"
+                onClick={() => handleDelete(post.id)}
+              >
+                Delete
+              </button>
             )}
-            {post.publishedAt && (
-              <span className="post-list__date">Published: {formatDate(post.publishedAt)}</span>
-            )}
-          </div>
-          {post.error && <p className="post-list__error">{post.error}</p>}
-          {(post.status === 'draft' || post.status === 'scheduled') && (
-            <button
-              type="button"
-              className="post-list__delete"
-              onClick={() => handleDelete(post._id)}
-            >
-              Delete
-            </button>
-          )}
-        </li>
-      ))}
+          </li>
+        );
+      })}
     </ul>
   );
 }

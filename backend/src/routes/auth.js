@@ -588,4 +588,48 @@ router.get('/twitter/callback', async (req, res) => {
   }
 });
 
+// Session Synchronization (Firebase ID Token -> Express Session)
+router.post('/session', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'No token provided' });
+  }
+
+  const token = authHeader.split('Bearer ')[1];
+  try {
+    const { auth: firebaseAuth } = await import('../firebase.js');
+    if (!firebaseAuth) {
+      return res.status(503).json({ error: 'Firebase Auth temporarily unavailable' });
+    }
+    const decodedToken = await firebaseAuth.verifyIdToken(token);
+
+    // Sync with MongoDB
+    let user = await User.findOne({ firebaseUid: decodedToken.uid });
+    if (!user) {
+      user = await User.create({
+        firebaseUid: decodedToken.uid,
+        email: decodedToken.email,
+        profile: {
+          firstName: decodedToken.name?.split(' ')[0] || '',
+          lastName: decodedToken.name?.split(' ').slice(1).join(' ') || '',
+          profilePicture: decodedToken.picture || '',
+        }
+      });
+    }
+
+    req.session.uid = decodedToken.uid;
+    req.session.userId = user._id.toString();
+    req.session.save((err) => {
+      if (err) {
+        console.error('Session save error:', err);
+        return res.status(500).json({ error: 'Session error' });
+      }
+      res.json({ ok: true, user: { id: user._id, email: user.email, profile: user.profile } });
+    });
+  } catch (err) {
+    console.error('Session sync error:', err.message);
+    res.status(401).json({ error: 'Invalid token' });
+  }
+});
+
 export default router;
