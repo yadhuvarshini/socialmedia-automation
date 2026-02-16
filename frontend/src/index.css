@@ -14,6 +14,16 @@
   --radius: 14px;
   --radius-sm: 10px;
   --font-sans: 'Outfit', 'DM Sans', system-ui, sans-serif;
+
+  /* Brand Colors */
+  --brand-linkedin: #0a66c2;
+  --brand-instagram: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
+  --brand-instagram-solid: #e1306c;
+  --brand-twitter: #1da1f2;
+  --brand-x: #000000;
+  --brand-facebook: #1877f2;
+  --brand-threads: #000000;
+  --brand-reddit: #ff4500;
 }
 
 * {
@@ -47,6 +57,7 @@ button {
   cursor: pointer;
 }
 
-input, textarea {
+input,
+textarea {
   font-family: inherit;
 }

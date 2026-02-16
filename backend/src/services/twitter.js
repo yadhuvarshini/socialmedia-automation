@@ -1,48 +1,32 @@
 import axios from 'axios';
-import OAuth from 'oauth-1.0a';
 import crypto from 'crypto';
 import { config } from '../config.js';
 
 /**
- * Create OAuth 1.0a instance for Twitter
+ * Generate PKCE Code Verifier and Challenge
  */
-function createOAuth() {
-  return new OAuth({
-    consumer: {
-      key: config.twitter.clientId,
-      secret: config.twitter.clientSecret,
-    },
-    signature_method: 'HMAC-SHA1',
-    hash_function(baseString, key) {
-      return crypto.createHmac('sha1', key).update(baseString).digest('base64');
-    },
-  });
+export function generatePKCEChallenge() {
+  const verifier = crypto.randomBytes(32).toString('base64url');
+  const challenge = crypto
+    .createHash('sha256')
+    .update(verifier)
+    .digest('base64url');
+  return { verifier, challenge };
 }
 
 /**
- * Verify Twitter credentials and get user profile
- * @param {string} accessToken - User access token
- * @param {string} accessTokenSecret - User access token secret
- * @returns {Promise<{ id?: string, username?: string, name?: string, error?: string }>}
+ * Verify Twitter credentials and get user profile using OAuth 2.0
+ * @param {string} accessToken - User access token (OAuth 2.0)
+ * @returns {Promise<{ id?: string, username?: string, name?: string, profilePicture?: string } | null>}
  */
-export async function verifyTwitterCredentials(accessToken, accessTokenSecret) {
+export async function verifyTwitterCredentials(accessToken) {
   try {
-    const oauth = createOAuth();
-    const requestData = {
-      url: 'https://api.x.com/2/users/me',
-      method: 'GET',
-    };
-
-    const token = {
-      key: accessToken,
-      secret: accessTokenSecret,
-    };
-
-    const authHeader = oauth.toHeader(oauth.authorize(requestData, token));
-
-    const { data } = await axios.get(requestData.url, {
+    const { data } = await axios.get('https://api.x.com/2/users/me', {
+      params: {
+        'user.fields': 'profile_image_url,username,name'
+      },
       headers: {
-        Authorization: authHeader.Authorization,
+        Authorization: `Bearer ${accessToken}`,
       },
     });
 
@@ -52,6 +36,7 @@ export async function verifyTwitterCredentials(accessToken, accessTokenSecret) {
       id: data.data.id,
       username: data.data.username,
       name: data.data.name,
+      profilePicture: data.data.profile_image_url
     };
   } catch (err) {
     console.error('Twitter Credentials Verification Error:', err.response?.data || err.message);
@@ -60,41 +45,33 @@ export async function verifyTwitterCredentials(accessToken, accessTokenSecret) {
 }
 
 /**
- * Create a post on Twitter/X
- * @param {string} accessToken - User access token
- * @param {string} accessTokenSecret - User access token secret
+ * Create a post on Twitter/X using OAuth 2.0
+ * @param {string} accessToken - User access token (OAuth 2.0)
  * @param {string} text - Post content (max 280 characters)
+ * @param {string[]} mediaIds - Optional media IDs
  * @returns {Promise<{ id?: string, url?: string, error?: string }>}
  */
-export async function createPost(accessToken, accessTokenSecret, text) {
+export async function createPost(accessToken, text, mediaIds = []) {
   try {
-    if (!text || text.trim().length === 0) {
-      return { error: 'Post text cannot be empty' };
+    if ((!text || text.trim().length === 0) && (!mediaIds || mediaIds.length === 0)) {
+      return { error: 'Post text or media is required' };
     }
 
-    if (text.length > 280) {
+    if (text && text.length > 280) {
       return { error: 'Post text cannot exceed 280 characters' };
     }
 
-    const oauth = createOAuth();
-    const requestData = {
-      url: 'https://api.x.com/2/tweets',
-      method: 'POST',
-    };
-
-    const token = {
-      key: accessToken,
-      secret: accessTokenSecret,
-    };
-
-    const authHeader = oauth.toHeader(oauth.authorize(requestData, token));
+    const body = { text: text?.trim() };
+    if (mediaIds && mediaIds.length > 0) {
+      body.media = { media_ids: mediaIds };
+    }
 
     const { data } = await axios.post(
-      requestData.url,
-      { text: text.trim() },
+      'https://api.x.com/2/tweets',
+      body,
       {
         headers: {
-          Authorization: authHeader.Authorization,
+          Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
         },
       }
@@ -105,8 +82,10 @@ export async function createPost(accessToken, accessTokenSecret, text) {
     }
 
     const tweetId = data.data?.id;
-    const username = data.data?.username || 'unknown';
-    const url = `https://x.com/${username}/status/${tweetId}`;
+    // Note: To get the URL reliably, we might need the username, 
+    // but the V2 response only returns ID and Text by default.
+    // We can use the status ID URL format.
+    const url = `https://x.com/i/status/${tweetId}`;
 
     return { id: tweetId, url };
   } catch (err) {
@@ -117,96 +96,42 @@ export async function createPost(accessToken, accessTokenSecret, text) {
 }
 
 /**
- * Get OAuth request token (step 1 of OAuth 1.0a flow)
- * @returns {Promise<{ oauth_token?: string, oauth_token_secret?: string, oauth_callback_confirmed?: string, error?: string }>}
+ * Exchange authorization code for OAuth 2.0 tokens
+ * @param {string} code - The auth code from callback
+ * @param {string} codeVerifier - The PKCE verifier
+ * @param {string} redirectUri - Must match the one in developer portal
+ * @returns {Promise<any>}
  */
-export async function getRequestToken(callbackUrl) {
+export async function exchangeOAuth2Code(code, codeVerifier, redirectUri) {
   try {
-    const oauth = createOAuth();
-    const requestData = {
-      url: 'https://api.x.com/oauth/request_token',
-      method: 'POST',
-    };
+    const params = new URLSearchParams({
+      code,
+      grant_type: 'authorization_code',
+      client_id: config.twitter.clientId,
+      redirect_uri: redirectUri,
+      code_verifier: codeVerifier,
+    });
 
-    const authHeader = oauth.toHeader(
-      oauth.authorize({
-        ...requestData,
-        data: { oauth_callback: callbackUrl },
-      })
-    );
+    // Twitter requires Basic Auth header with Client ID and Secret for OAuth 2.0 Confidential Clients
+    const authHeader = Buffer.from(`${config.twitter.clientId}:${config.twitter.clientSecret}`).toString('base64');
 
-    // Send oauth_callback as form-encoded body
-    const body = new URLSearchParams({ oauth_callback: callbackUrl });
-
-    const response = await axios.post(requestData.url, body.toString(), {
+    const { data } = await axios.post('https://api.x.com/2/oauth2/token', params.toString(), {
       headers: {
-        Authorization: authHeader.Authorization,
         'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${authHeader}`
       },
     });
 
-    // Parse the response (it's in query string format)
-    const params = new URLSearchParams(response.data);
-    return {
-      oauth_token: params.get('oauth_token'),
-      oauth_token_secret: params.get('oauth_token_secret'),
-      oauth_callback_confirmed: params.get('oauth_callback_confirmed'),
-    };
+    return data;
   } catch (err) {
     const msg = err.response?.data || err.message;
-    console.error('Twitter Request Token Error:', msg);
+    console.error('Twitter OAuth2 Exchange Error:', msg);
     return { error: msg };
   }
 }
 
 /**
- * Exchange request token for access token (step 3 of OAuth 1.0a flow)
- * @param {string} oauthToken - OAuth token from callback
- * @param {string} oauthVerifier - OAuth verifier from callback
- * @param {string} oauthTokenSecret - OAuth token secret from step 1
- * @returns {Promise<{ oauth_token?: string, oauth_token_secret?: string, error?: string }>}
+ * Legacy OAuth 1.0a functions (kept for backward compatibility if needed, but not exporting)
+ * Actually, we should probably remove them if we're migrating.
  */
-export async function getAccessToken(oauthToken, oauthVerifier, oauthTokenSecret) {
-  try {
-    const oauth = createOAuth();
-    const requestData = {
-      url: 'https://api.x.com/oauth/access_token',
-      method: 'POST',
-    };
-
-    const token = {
-      key: oauthToken,
-      secret: oauthTokenSecret,
-    };
-
-    const authHeader = oauth.toHeader(
-      oauth.authorize({
-        ...requestData,
-        data: { oauth_verifier: oauthVerifier },
-      }, token)
-    );
-
-    // Send oauth_verifier as form-encoded body
-    const body = new URLSearchParams({ oauth_verifier: oauthVerifier });
-
-    const response = await axios.post(requestData.url, body.toString(), {
-      headers: {
-        Authorization: authHeader.Authorization,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-    });
-
-    // Parse the response (it's in query string format)
-    const params = new URLSearchParams(response.data);
-    return {
-      oauth_token: params.get('oauth_token'),
-      oauth_token_secret: params.get('oauth_token_secret'),
-      user_id: params.get('user_id'),
-      screen_name: params.get('screen_name'),
-    };
-  } catch (err) {
-    const msg = err.response?.data || err.message;
-    console.error('Twitter Access Token Error:', msg);
-    return { error: msg };
-  }
-}
+// ... (Removing 1.0a exports as we migrate)

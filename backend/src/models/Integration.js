@@ -56,4 +56,20 @@ const integrationSchema = new mongoose.Schema(
 // Compound index to ensure one integration per platform per user
 integrationSchema.index({ userId: 1, platform: 1 }, { unique: true });
 
+// Virtual field to map _id to id for frontend compatibility
+integrationSchema.virtual('id').get(function () {
+  return this._id.toHexString();
+});
+
+// Ensure virtuals are included when converting to JSON
+integrationSchema.set('toJSON', {
+  virtuals: true,
+  transform: function (doc, ret) {
+    ret.id = ret._id;
+    delete ret._id;
+    delete ret.__v;
+    return ret;
+  }
+});
+
 export const Integration = mongoose.model('Integration', integrationSchema);

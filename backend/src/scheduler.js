@@ -90,13 +90,12 @@ async function processScheduledPosts() {
             break;
 
           case 'twitter':
-            if (!integration.accessToken || !integration.accessTokenSecret) {
+            if (!integration.accessToken) {
               errors.push({ platform: 'twitter', error: 'Twitter credentials missing' });
               continue;
             }
             result = await createTwitterPost(
               integration.accessToken,
-              integration.accessTokenSecret,
               trimmed
             );
             break;

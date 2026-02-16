@@ -6,7 +6,7 @@ import { User } from '../models/User.js';
 import { Integration } from '../models/Integration.js';
 import { getMemberId } from '../services/linkedin.js';
 import { verifyFacebookToken, getPages, exchangeToken } from '../services/facebook.js';
-import { getRequestToken, getAccessToken, verifyTwitterCredentials } from '../services/twitter.js';
+import { generatePKCEChallenge, exchangeOAuth2Code, verifyTwitterCredentials } from '../services/twitter.js';
 import { exchangeCodeForToken as exchangeRedditCode, getRedditUser } from '../services/reddit.js';
 
 const router = Router();
@@ -472,119 +472,120 @@ router.post('/facebook/select-page', async (req, res) => {
 });
 
 // Twitter OAuth flow - Step 1: Get request token
+// Twitter OAuth 2.0 flow - Step 1: Redirect to Twitter
 router.get('/twitter', async (req, res) => {
   try {
     const state = uuidv4();
+    const { verifier, challenge } = generatePKCEChallenge();
+
     req.session = req.session || {};
     req.session.twitterOAuthState = state;
+    req.session.twitterCodeVerifier = verifier;
 
-    const callbackUrl = `${config.frontendUrl}/api/auth/twitter/callback`;
-    const result = await getRequestToken(callbackUrl);
-
-    if (result.error) {
-      return res.redirect(`${config.frontendUrl}/?error=${encodeURIComponent(result.error)}`);
-    }
-
-    req.session.twitterOAuthTokenSecret = result.oauth_token_secret;
-    req.session.save((err) => {
-      if (err) {
-        return res.redirect(`${config.frontendUrl}/?error=${encodeURIComponent(err.message)}`);
-      }
-      res.redirect(`https://api.x.com/oauth/authorize?oauth_token=${result.oauth_token}`);
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: config.twitter.clientId,
+      redirect_uri: `${config.frontendUrl}/api/auth/twitter/callback`,
+      scope: 'tweet.read tweet.write users.read offline.access',
+      state,
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
     });
+
+    res.redirect(`https://twitter.com/i/oauth2/authorize?${params}`);
   } catch (err) {
-    const msg = err.message;
-    res.redirect(`${config.frontendUrl}/?error=${encodeURIComponent(msg)}`);
+    res.redirect(`${config.frontendUrl}/?error=${encodeURIComponent(err.message)}`);
   }
 });
 
-// Twitter OAuth flow - Step 2: Handle callback
+// Twitter OAuth 2.0 flow - Step 2: Handle callback
 router.get('/twitter/callback', async (req, res) => {
-  const { oauth_token, oauth_verifier, denied } = req.query;
+  const { code, state, error } = req.query;
 
-  if (denied) {
-    return res.redirect(`${config.frontendUrl}/?error=twitter_denied`);
+  if (error) {
+    return res.redirect(`${config.frontendUrl}/?error=${encodeURIComponent(error)}`);
   }
 
-  if (!oauth_token || !oauth_verifier) {
-    return res.redirect(`${config.frontendUrl}/?error=missing_twitter_params`);
+  const savedState = req.session?.twitterOAuthState;
+  const codeVerifier = req.session?.twitterCodeVerifier;
+
+  if (!savedState || savedState !== state) {
+    return res.status(401).send('Invalid state');
   }
 
-  const oauthTokenSecret = req.session?.twitterOAuthTokenSecret;
-  if (!oauthTokenSecret) {
-    return res.redirect(`${config.frontendUrl}/?error=invalid_twitter_session`);
+  if (!code || !codeVerifier) {
+    return res.redirect(`${config.frontendUrl}/?error=missing_params`);
   }
 
   try {
-    const result = await getAccessToken(oauth_token, oauth_verifier, oauthTokenSecret);
+    const redirectUri = `${config.frontendUrl}/api/auth/twitter/callback`;
+    const tokenData = await exchangeOAuth2Code(code, codeVerifier, redirectUri);
 
-    if (result.error) {
-      return res.redirect(`${config.frontendUrl}/?error=${encodeURIComponent(result.error)}`);
+    if (tokenData.error) {
+      return res.redirect(`${config.frontendUrl}/?error=${encodeURIComponent(tokenData.error)}`);
     }
 
-    const { oauth_token: accessToken, oauth_token_secret: accessTokenSecret, user_id: twitterId, screen_name: username } = result;
+    const { access_token: accessToken, refresh_token: refreshToken, expires_in: expiresIn } = tokenData;
 
     // Verify credentials and get user info
-    const userInfo = await verifyTwitterCredentials(accessToken, accessTokenSecret);
+    const userInfo = await verifyTwitterCredentials(accessToken);
 
     if (!userInfo) {
       return res.redirect(`${config.frontendUrl}/?error=twitter_verification_failed`);
     }
+
+    const { id: twitterId, username, name, profilePicture } = userInfo;
 
     // Find or create user
     let user = await User.findOne({ twitterId });
 
     const userData = {
       twitterId,
-      accessToken,
-      accessTokenSecret,
-      tokenExpiresAt: null, // OAuth 1.0a tokens don't expire unless revoked
       profile: {
-        firstName: userInfo.name ? userInfo.name.split(' ')[0] : username,
-        lastName: userInfo.name ? userInfo.name.split(' ').slice(1).join(' ') : '',
-        profilePicture: `https://unavatar.io/twitter/${username}`,
+        firstName: name ? name.split(' ')[0] : username,
+        lastName: name ? name.split(' ').slice(1).join(' ') : '',
+        profilePicture: profilePicture || `https://unavatar.io/twitter/${username}`,
       },
     };
 
-    if (user) {
-      user = await User.findByIdAndUpdate(user._id, userData, { new: true });
-    } else {
-      try {
-        user = await User.create(userData);
-      } catch (createErr) {
-        if (createErr.code === 11000) {
-          if (createErr.keyValue && createErr.keyValue.twitterId) {
-            user = await User.findOneAndUpdate(
-              { twitterId },
-              userData,
-              { new: true }
-            );
-          } else {
-            throw createErr;
-          }
-        } else {
-          throw createErr;
-        }
-      }
+    if (!user) {
+      // Reuse existing logic for user creation/association if needed
+      // For now, assume we're tying it to the current session or creating a new user
+      user = await User.create(userData);
     }
 
-    if (!user) {
-      return res.redirect(`${config.frontendUrl}/?error=failed_to_create_user`);
-    }
+    // Create or update Twitter integration
+    await Integration.findOneAndUpdate(
+      { userId: user._id, platform: 'twitter' },
+      {
+        userId: user._id,
+        platform: 'twitter',
+        platformUserId: twitterId,
+        platformUsername: username,
+        accessToken,
+        refreshToken,
+        tokenExpiresAt: new Date(Date.now() + expiresIn * 1000),
+        profile: {
+          name,
+          username,
+          profilePicture,
+        },
+        isActive: true,
+        lastUsedAt: new Date(),
+      },
+      { upsert: true, new: true }
+    );
 
     req.session.userId = user._id.toString();
     delete req.session.twitterOAuthState;
-    delete req.session.twitterOAuthTokenSecret;
+    delete req.session.twitterCodeVerifier;
 
     req.session.save((err) => {
-      if (err) {
-        return res.redirect(`${config.frontendUrl}/?error=${encodeURIComponent(err.message)}`);
-      }
+      if (err) return res.redirect(`${config.frontendUrl}/?error=${encodeURIComponent(err.message)}`);
       res.redirect(`${config.frontendUrl}/home`);
     });
   } catch (err) {
-    const msg = err.response?.data?.error?.message || err.message;
-    res.redirect(`${config.frontendUrl}/?error=${encodeURIComponent(msg)}`);
+    res.redirect(`${config.frontendUrl}/?error=${encodeURIComponent(err.message)}`);
   }
 });
 

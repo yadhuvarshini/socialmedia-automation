@@ -10,6 +10,7 @@ import authIntegrationsRoutes from './routes/auth-integrations.js';
 import integrationsRoutes from './routes/integrations.js';
 import meRoutes from './routes/me.js';
 import postsRoutes from './routes/posts.js';
+import aiRoutes from './routes/ai.js';
 import { startScheduler } from './scheduler.js';
 
 const app = express();
@@ -57,6 +58,7 @@ app.use('/api/auth/integrations', authIntegrationsRoutes);
 app.use('/api/integrations', integrationsRoutes);
 app.use('/api/me', meRoutes);
 app.use('/api/posts', postsRoutes);
+app.use('/api/ai', aiRoutes);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 

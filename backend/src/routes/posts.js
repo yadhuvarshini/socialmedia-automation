@@ -19,17 +19,20 @@ router.get('/', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 5;
     const startAfter = req.query.startAfter;
+    const platform = req.query.platform;
 
-    let query = Post.find({ userId: req.user._id })
+    let baseQuery = { userId: req.user._id };
+    if (platform) {
+      baseQuery.platforms = platform;
+    }
+
+    let query = Post.find(baseQuery)
       .sort({ createdAt: -1 })
       .limit(limit);
 
     if (startAfter) {
-      // In MongoDB, we can use the _id for simple "startAfter" if we assume chronological order,
-      // or just use offset. Given the current frontend sends the last ID, we'll use { _id: { $lt: startAfter } }
-      // assuming we sort by _id or createdAt.
       query = Post.find({
-        userId: req.user._id,
+        ...baseQuery,
         _id: { $lt: startAfter }
       })
         .sort({ createdAt: -1 })
@@ -37,7 +40,7 @@ router.get('/', async (req, res) => {
     }
 
     const posts = await query.exec();
-    const total = await Post.countDocuments({ userId: req.user._id });
+    const total = await Post.countDocuments(baseQuery);
 
     // Format for frontend
     const formattedPosts = posts.map(doc => ({
@@ -244,7 +247,7 @@ router.post('/', async (req, res) => {
             break;
 
           case 'twitter':
-            if (!integration.accessToken || !integration.accessTokenSecret) {
+            if (!integration.accessToken) {
               errors.push({ platform: 'twitter', error: 'Twitter credentials missing' });
               continue;
             }
@@ -254,7 +257,6 @@ router.post('/', async (req, res) => {
             }
             result = await createTwitterPost(
               integration.accessToken,
-              integration.accessTokenSecret,
               trimmed
             );
             break;
