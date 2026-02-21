@@ -15,7 +15,7 @@ const postSchema = new mongoose.Schema(
     // Legacy field for backward compatibility
     linkedinPostUrn: { type: String },
     // New multi-platform fields
-    platforms: [{ type: String, enum: ['linkedin', 'facebook', 'twitter', 'threads', 'reddit', 'instagram'] }],
+    platforms: [{ type: String, enum: ['linkedin', 'facebook', 'twitter', 'threads', 'instagram'] }],
     mediaType: { type: String, enum: ['text', 'image', 'video', 'carousel'], default: 'text' },
     imageUrl: { type: String },
     videoUrl: { type: String },

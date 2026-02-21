@@ -3,11 +3,11 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config.js';
 import { User } from '../models/User.js';
+import { signToken } from '../services/jwt.js';
 import { Integration } from '../models/Integration.js';
 import { getMemberId } from '../services/linkedin.js';
 import { verifyFacebookToken, getPages, exchangeToken } from '../services/facebook.js';
 import { generatePKCEChallenge, exchangeOAuth2Code, verifyTwitterCredentials } from '../services/twitter.js';
-import { exchangeCodeForToken as exchangeRedditCode, getRedditUser } from '../services/reddit.js';
 
 const router = Router();
 const { linkedin, frontendUrl, session } = config;
@@ -41,9 +41,10 @@ router.post('/signup', async (req, res) => {
     });
 
     req.session.userId = user._id.toString();
+    const token = signToken(user._id);
     req.session.save((err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
-      res.json({ ok: true, user: { id: user._id, email: user.email, profile: user.profile } });
+      res.json({ ok: true, isNew: true, token, user: { id: user._id, email: user.email, profile: user.profile } });
     });
   } catch (err) {
     console.error('Signup Error:', err);
@@ -71,9 +72,10 @@ router.post('/login', async (req, res) => {
     }
 
     req.session.userId = user._id.toString();
+    const token = signToken(user._id);
     req.session.save((err) => {
       if (err) return res.status(500).json({ error: 'Session error' });
-      res.json({ ok: true, user: { id: user._id, email: user.email, profile: user.profile } });
+      res.json({ ok: true, token, user: { id: user._id, email: user.email, profile: user.profile } });
     });
   } catch (err) {
     console.error('Login Error:', err);
@@ -188,101 +190,6 @@ router.get('/linkedin/callback', async (req, res) => {
   }
 });
 
-// Reddit OAuth flow - Sign in
-router.get('/reddit', (req, res) => {
-  const state = uuidv4();
-  req.session = req.session || {};
-  req.session.redditOAuthState = state;
-
-  const params = new URLSearchParams({
-    client_id: config.reddit?.clientId,
-    response_type: 'code',
-    state,
-    redirect_uri: `${config.frontendUrl}/api/auth/reddit/callback`,
-    duration: 'permanent',
-    scope: 'identity submit read mysubreddits',
-  });
-
-  res.redirect(`https://www.reddit.com/api/v1/authorize?${params}`);
-});
-
-router.get('/reddit/callback', async (req, res) => {
-  const { code, state, error } = req.query;
-
-  if (error) {
-    return res.redirect(`${config.frontendUrl}/?error=${encodeURIComponent(error)}`);
-  }
-
-  const savedState = req.session?.redditOAuthState;
-  if (!savedState || savedState !== state) {
-    return res.status(401).send('Invalid state');
-  }
-
-  if (!code) {
-    return res.redirect(`${config.frontendUrl}/?error=missing_code`);
-  }
-
-  try {
-    const result = await exchangeRedditCode(code);
-
-    if (result.error) {
-      return res.redirect(`${config.frontendUrl}/?error=${encodeURIComponent(result.error)}`);
-    }
-
-    const { access_token: accessToken, refresh_token: refreshToken, expires_in: expiresIn } = result;
-    const userInfo = await getRedditUser(accessToken);
-
-    if (userInfo.error) {
-      return res.redirect(`${config.frontendUrl}/?error=${encodeURIComponent(userInfo.error)}`);
-    }
-
-    // Find or create user
-    let user = await User.findOne({ 'profile.firstName': userInfo.name });
-    if (!user) {
-      user = await User.create({
-        profile: {
-          firstName: userInfo.name,
-          lastName: '',
-          profilePicture: userInfo.icon_img,
-        },
-      });
-    }
-
-    // Create or update Reddit integration
-    await Integration.findOneAndUpdate(
-      { userId: user._id, platform: 'reddit' },
-      {
-        userId: user._id,
-        platform: 'reddit',
-        platformUserId: userInfo.id,
-        platformUsername: userInfo.name,
-        accessToken,
-        refreshToken,
-        redditRefreshToken: refreshToken,
-        tokenExpiresAt: new Date(Date.now() + (expiresIn || 3600) * 1000),
-        profile: {
-          name: userInfo.name,
-          username: userInfo.name,
-          profilePicture: userInfo.icon_img,
-        },
-        isActive: true,
-        lastUsedAt: new Date(),
-      },
-      { upsert: true, new: true }
-    );
-
-    req.session.userId = user._id.toString();
-    delete req.session.redditOAuthState;
-    req.session.save((err) => {
-      if (err) return res.redirect(`${config.frontendUrl}/?error=${encodeURIComponent(err.message)}`);
-      res.redirect(`${config.frontendUrl}/home`);
-    });
-  } catch (err) {
-    const msg = err.response?.data?.error || err.message;
-    res.redirect(`${config.frontendUrl}/?error=${encodeURIComponent(msg)}`);
-  }
-});
-
 router.post('/logout', (req, res) => {
   const cookieName = 'blazly.sid';
   const cookieOpts = { path: '/', httpOnly: true };
@@ -303,7 +210,7 @@ router.get('/facebook', (req, res) => {
     client_id: config.facebook.appId,
     redirect_uri: `${config.frontendUrl}/api/auth/facebook/callback`,
     state,
-    scope: 'public_profile,email,pages_show_list,pages_read_engagement,pages_manage_posts,pages_read_user_content',
+    scope: 'public_profile,email,pages_show_list,pages_read_engagement,pages_manage_engagement,pages_manage_posts,pages_read_user_content',
     response_type: 'code',
   });
 
@@ -589,8 +496,13 @@ router.get('/twitter/callback', async (req, res) => {
   }
 });
 
-// Session Synchronization (Firebase ID Token -> Express Session)
+// Session sync: Firebase token -> Express session, or no-op if already have session (MongoDB auth)
 router.post('/session', async (req, res) => {
+  // If already have MongoDB session, no-op (for email signup/login users)
+  if (req.session && req.session.userId) {
+    return res.json({ ok: true });
+  }
+
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'No token provided' });
@@ -604,7 +516,6 @@ router.post('/session', async (req, res) => {
     }
     const decodedToken = await firebaseAuth.verifyIdToken(token);
 
-    // Sync with MongoDB
     let user = await User.findOne({ firebaseUid: decodedToken.uid });
     if (!user) {
       user = await User.create({
@@ -614,7 +525,7 @@ router.post('/session', async (req, res) => {
           firstName: decodedToken.name?.split(' ')[0] || '',
           lastName: decodedToken.name?.split(' ').slice(1).join(' ') || '',
           profilePicture: decodedToken.picture || '',
-        }
+        },
       });
     }
 

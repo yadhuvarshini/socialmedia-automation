@@ -8,7 +8,6 @@ import { getMemberId } from '../services/linkedin.js';
 import { verifyFacebookToken, getPages, exchangeToken } from '../services/facebook.js';
 import { generatePKCEChallenge, exchangeOAuth2Code, verifyTwitterCredentials } from '../services/twitter.js';
 import { exchangeCodeForToken, getThreadsUser } from '../services/threads.js';
-import { exchangeCodeForToken as exchangeRedditCode, getRedditUser, getUserSubreddits } from '../services/reddit.js';
 import { exchangeCodeForToken as exchangeInstagramCode, exchangeForLongLivedToken, getFacebookUser, getPagesWithInstagram, getInstagramAccount, exchangeInstagramLoginCode } from '../services/instagram.js';
 
 const router = Router();
@@ -41,7 +40,7 @@ router.get('/linkedin/callback', async (req, res) => {
   const savedState = req.session?.linkedinOAuthState;
   const savedUserId = req.session?.linkedinUserId;
   if (!savedState || savedState !== state || !savedUserId) {
-    return res.status(401).send('Invalid state');
+    return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent('Connection timed out. Please try connecting again from the dashboard.')}`);
   }
   if (!code) {
     return res.redirect(`${frontendUrl}/integrations?error=missing_code`);
@@ -115,7 +114,7 @@ router.get('/facebook', (req, res) => {
     client_id: config.facebook.appId,
     redirect_uri: `${frontendUrl}/api/auth/integrations/facebook/callback`,
     state,
-    scope: 'public_profile,email,pages_show_list,pages_read_engagement,pages_manage_posts,pages_read_user_content',
+    scope: 'public_profile,email,pages_show_list,pages_read_engagement,pages_manage_engagement,pages_manage_posts,pages_read_user_content',
     response_type: 'code',
   });
 
@@ -132,7 +131,7 @@ router.get('/facebook/callback', async (req, res) => {
   const savedState = req.session?.facebookOAuthState;
   const savedUserId = req.session?.facebookUserId;
   if (!savedState || savedState !== state || !savedUserId) {
-    return res.status(401).send('Invalid state');
+    return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent('Connection timed out. Please try connecting again from the dashboard.')}`);
   }
 
   if (!code) {
@@ -290,7 +289,7 @@ router.get('/twitter/callback', async (req, res) => {
   const savedUserId = req.session?.twitterUserId;
 
   if (!savedState || savedState !== state || !savedUserId) {
-    return res.status(401).send('Invalid state');
+    return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent('Connection timed out. Please try connecting again from the dashboard.')}`);
   }
 
   if (!code || !codeVerifier) {
@@ -361,7 +360,7 @@ router.get('/threads', (req, res) => {
   const params = new URLSearchParams({
     client_id: config.threads.appId,
     redirect_uri: `${frontendUrl}/api/auth/integrations/threads/callback`,
-    scope: 'threads_basic,threads_content_publish',
+    scope: 'threads_basic,threads_content_publish,threads_manage_replies',
     response_type: 'code',
     state,
   });
@@ -379,7 +378,7 @@ router.get('/threads/callback', async (req, res) => {
   const savedState = req.session?.threadsOAuthState;
   const savedUserId = req.session?.threadsUserId;
   if (!savedState || savedState !== state || !savedUserId) {
-    return res.status(401).send('Invalid state');
+    return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent('Connection timed out. Please try connecting again from the dashboard.')}`);
   }
 
   if (!code) {
@@ -437,145 +436,6 @@ router.get('/threads/callback', async (req, res) => {
   }
 });
 
-// Reddit Integration
-router.get('/reddit', (req, res) => {
-  const state = uuidv4();
-  req.session = req.session || {};
-  req.session.redditOAuthState = state;
-  req.session.redditUserId = req.user._id;
-
-  const params = new URLSearchParams({
-    client_id: config.reddit.clientId,
-    response_type: 'code',
-    state,
-    redirect_uri: config.reddit.redirectUri,
-    duration: 'permanent',
-    scope: 'identity submit read mysubreddits',
-  });
-
-  res.redirect(`https://www.reddit.com/api/v1/authorize?${params}`);
-});
-
-router.get('/reddit/callback', async (req, res) => {
-  const { code, state, error } = req.query;
-
-  if (error) {
-    return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(error)}`);
-  }
-
-  const savedState = req.session?.redditOAuthState;
-  const savedUserId = req.session?.redditUserId;
-  if (!savedState || savedState !== state || !savedUserId) {
-    return res.status(401).send('Invalid state');
-  }
-
-  if (!code) {
-    return res.redirect(`${frontendUrl}/home?error=missing_code`);
-  }
-
-  try {
-    const result = await exchangeRedditCode(code);
-
-    if (result.error) {
-      return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(result.error)}`);
-    }
-
-    const { access_token: accessToken, refresh_token: refreshToken, expires_in: expiresIn } = result;
-    const tokenExpiresAt = new Date(Date.now() + (expiresIn || 3600) * 1000);
-
-    const userInfo = await getRedditUser(accessToken);
-
-    if (userInfo.error) {
-      return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(userInfo.error)}`);
-    }
-
-    // Store subreddits in session for selection
-    const subreddits = await getUserSubreddits(accessToken);
-
-    req.session.redditAccessToken = accessToken;
-    req.session.redditRefreshToken = refreshToken;
-    req.session.redditTokenExpiresAt = tokenExpiresAt;
-    req.session.redditUserInfo = userInfo;
-    req.session.redditSubreddits = subreddits;
-    req.session.redditUserId = savedUserId;
-    delete req.session.redditOAuthState;
-
-    req.session.save(() => {
-      res.redirect(`${frontendUrl}/integrations/reddit/select-subreddit`);
-    });
-  } catch (err) {
-    const msg = err.response?.data?.error || err.message;
-    res.redirect(`${frontendUrl}/home?error=${encodeURIComponent(msg)}`);
-  }
-});
-
-router.get('/reddit/subreddits', requireAuth, (req, res) => {
-  if (!req.session.redditSubreddits) {
-    return res.status(401).json({ error: 'No Reddit session found. Please sign in again.' });
-  }
-  res.json({ subreddits: req.session.redditSubreddits });
-});
-
-router.post('/reddit/select-subreddit', requireAuth, async (req, res) => {
-  const { subreddit } = req.body;
-  const savedUserId = req.session?.redditUserId;
-
-  if (!req.session.redditAccessToken || !savedUserId) {
-    return res.status(401).json({ error: 'No Reddit session found. Please sign in again.' });
-  }
-
-  if (!subreddit) {
-    return res.status(400).json({ error: 'Subreddit is required' });
-  }
-
-  try {
-    const userInfo = req.session.redditUserInfo;
-    const accessToken = req.session.redditAccessToken;
-    const refreshToken = req.session.redditRefreshToken;
-    const tokenExpiresAt = req.session.redditTokenExpiresAt;
-
-    const integrationData = {
-      userId: savedUserId,
-      platform: 'reddit',
-      platformUserId: userInfo.id,
-      platformUsername: userInfo.name,
-      accessToken,
-      refreshToken,
-      redditRefreshToken: refreshToken,
-      redditSubreddit: subreddit,
-      tokenExpiresAt,
-      profile: {
-        name: userInfo.name,
-        username: userInfo.name,
-        profilePicture: userInfo.icon_img,
-      },
-      isActive: true,
-      lastUsedAt: new Date(),
-    };
-
-    // Find and update or create integration in MongoDB
-    await Integration.findOneAndUpdate(
-      { userId: savedUserId, platform: 'reddit' },
-      integrationData,
-      { upsert: true, new: true }
-    );
-
-    delete req.session.redditAccessToken;
-    delete req.session.redditRefreshToken;
-    delete req.session.redditTokenExpiresAt;
-    delete req.session.redditUserInfo;
-    delete req.session.redditSubreddits;
-    delete req.session.redditUserId;
-
-    req.session.save(() => {
-      res.json({ ok: true });
-    });
-  } catch (err) {
-    console.error('Reddit Subreddit Selection Error:', err);
-    res.status(500).json({ error: 'Internal server error: ' + err.message });
-  }
-});
-
 // Instagram Direct Login
 router.get('/instagram', (req, res) => {
   const state = uuidv4();
@@ -584,7 +444,6 @@ router.get('/instagram', (req, res) => {
   req.session.instagramUserId = req.user._id;
 
   const params = new URLSearchParams({
-    force_reauth: 'true',
     client_id: config.instagram.appId,
     redirect_uri: config.instagram.redirectUri,
     response_type: 'code',
@@ -607,12 +466,8 @@ router.get('/instagram/callback', async (req, res) => {
   const savedState = req.session?.instagramOAuthState;
   const savedUserId = req.session?.instagramUserId;
   if (!savedState || savedState !== state || !savedUserId) {
-    console.error('Instagram callback state mismatch:', {
-      savedState,
-      receivedState: state,
-      hasSession: !!req.session
-    });
-    return res.status(401).send('Invalid state - session data was lost. Please try logging in again.');
+    console.error('Instagram callback state mismatch:', { savedState, receivedState: state, hasSession: !!req.session });
+    return res.redirect(`${frontendUrl}/home?error=${encodeURIComponent('Connection timed out. Please try connecting again from the dashboard.')}`);
   }
 
   if (!code) {

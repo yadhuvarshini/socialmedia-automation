@@ -112,10 +112,6 @@
   color: var(--brand-facebook);
 }
 
-.post-list__platform-icon--reddit {
-  color: var(--brand-reddit);
-}
-
 .post-list__content {
   margin: 0 0 12px 0;
   font-size: 1rem;

@@ -5,6 +5,7 @@ export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   mongoUri: process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/blazly',
   frontendUrl: process.env.FRONTEND_URL || 'https://localhost:5173',
+  uploadBaseUrl: process.env.UPLOAD_BASE_URL || '',
   linkedin: {
     clientId: process.env.LINKEDIN_CLIENT_ID || '86swiutwriegdi',
     clientSecret: process.env.LINKEDIN_CLIENT_SECRET,
@@ -27,12 +28,6 @@ export const config = {
     appSecret: process.env.THREADS_APP_SECRET,
     redirectUri: process.env.THREADS_REDIRECT_URI || `${process.env.FRONTEND_URL || 'https://localhost:5173'}/api/auth/integrations/threads/callback`,
   },
-  reddit: {
-    clientId: process.env.REDDIT_CLIENT_ID,
-    clientSecret: process.env.REDDIT_CLIENT_SECRET,
-    redirectUri: process.env.REDDIT_REDIRECT_URI || `${process.env.FRONTEND_URL || 'https://localhost:5173'}/api/auth/integrations/reddit/callback`,
-    userAgent: process.env.REDDIT_USER_AGENT || 'web:blazly:v1.0.0 (by /u/blazly)',
-  },
   instagram: {
     appId: process.env.INSTAGRAM_LOGIN_APP_ID || '947447064275574',
     appSecret: process.env.INSTAGRAM_LOGIN_APP_SECRET || '8f6090753f492441e74755d4e4c20c9e',
@@ -45,6 +40,10 @@ export const config = {
   session: {
     secret: process.env.SESSION_SECRET || 'blazly-session-secret-change-in-production',
     cookieMaxAge: 60 * 60 * 24 * 7, // 7 days
+  },
+  jwt: {
+    secret: process.env.JWT_SECRET || process.env.SESSION_SECRET || 'blazly-jwt-secret-change-in-production',
+    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   },
   firebaseServiceAccount: process.env.FIREBASE_SERVICE_ACCOUNT,
 };

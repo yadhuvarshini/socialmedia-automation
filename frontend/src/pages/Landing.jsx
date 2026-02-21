@@ -1,13 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useAuth } from '../hooks/useAuth';
-import { auth, db } from '../firebase';
-import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  updateProfile
-} from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { useAuth, api } from '../hooks/useAuth';
+import LoadingScreen from '../components/LoadingScreen';
 import './Landing.css';
 
 export default function Landing() {
@@ -31,7 +25,7 @@ export default function Landing() {
   if (loading) {
     return (
       <div className="landing">
-        <div className="landing__loader">Loading…</div>
+        <LoadingScreen />
       </div>
     );
   }
@@ -42,37 +36,31 @@ export default function Landing() {
     setSubmitting(true);
 
     try {
-      if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
-      } else {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        const newUser = userCredential.user;
+      const endpoint = isLogin ? '/auth/login' : '/auth/signup';
+      const body = isLogin
+        ? { email, password }
+        : { email, password, firstName, lastName };
 
-        // Update Firebase Auth profile
-        await updateProfile(newUser, {
-          displayName: `${firstName} ${lastName}`.trim()
-        });
+      const res = await api(endpoint, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
 
-        // Create document in Firestore
-        await setDoc(doc(db, 'users', newUser.uid), {
-          email: newUser.email,
-          firstName,
-          lastName,
-          createdAt: new Date().toISOString(),
-          profilePicture: `https://ui-avatars.com/api/?name=${firstName}+${lastName}&background=random`
-        });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setFormError(data.error || 'Authentication failed');
+        setSubmitting(false);
+        return;
       }
-      // useAuth will detect the change via onAuthStateChanged
+
+      if (data.token) {
+        localStorage.setItem('blazly_token', data.token);
+      }
+      window.location.href = data.isNew ? '/onboarding' : '/home';
     } catch (err) {
       console.error('Auth Error:', err);
-      let message = 'Authentication failed';
-      if (err.code === 'auth/user-not-found') message = 'No user found with this email.';
-      if (err.code === 'auth/wrong-password') message = 'Incorrect password.';
-      if (err.code === 'auth/email-already-in-use') message = 'Email is already in use.';
-      if (err.code === 'auth/weak-password') message = 'Password should be at least 6 characters.';
-      if (err.code === 'auth/invalid-email') message = 'Invalid email address.';
-
-      setFormError(message || err.message);
+      setFormError('Network error. Please try again.');
       setSubmitting(false);
     }
   };
@@ -102,7 +90,6 @@ export default function Landing() {
                 className="landing__input"
                 value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
-                required={!isLogin}
               />
               <input
                 type="text"
@@ -110,7 +97,6 @@ export default function Landing() {
                 className="landing__input"
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
-                required={!isLogin}
               />
             </div>
           )}
@@ -144,14 +130,13 @@ export default function Landing() {
         </form>
 
         <div className="landing__toggle">
-          {isLogin ? "Don't have an account? " : "Already have an account? "}
+          {isLogin ? "Don't have an account? " : 'Already have an account? '}
           <button
             className="landing__toggle-btn"
+            type="button"
             onClick={() => {
               setIsLogin(!isLogin);
               setFormError('');
-              setEmail('');
-              setPassword('');
             }}
           >
             {isLogin ? 'Sign up' : 'Sign in'}

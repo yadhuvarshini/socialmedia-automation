@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import LoadingScreen from '../components/LoadingScreen';
 import './InstagramAccountSelection.css';
 
 export default function InstagramAccountSelection() {
@@ -56,8 +57,8 @@ export default function InstagramAccountSelection() {
   if (loading) {
     return (
       <div className="instagram-account-selection">
-        <div className="instagram-account-selection__card">
-          <div className="instagram-account-selection__loader">Loading Instagram accounts...</div>
+        <div className="instagram-account-selection__card instagram-account-selection__card--loading">
+          <LoadingScreen compact />
         </div>
       </div>
     );

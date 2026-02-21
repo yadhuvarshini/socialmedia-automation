@@ -23,7 +23,6 @@
   --brand-x: #000000;
   --brand-facebook: #1877f2;
   --brand-threads: #000000;
-  --brand-reddit: #ff4500;
 }
 
 * {
@@ -60,4 +59,13 @@ button {
 input,
 textarea {
   font-family: inherit;
+}
+
+.app-loading {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  color: var(--text-muted);
 }

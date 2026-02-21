@@ -1,12 +1,13 @@
 import cron from 'node-cron';
 import { Post } from './models/Post.js';
+import { User } from './models/User.js';
 import { Integration } from './models/Integration.js';
+import { pollAndGenerateInsights } from './services/trendEngine.service.js';
 import { canMakeLinkedInCall, incrementLinkedInUsage } from './services/rateLimit.js';
 import { createPost as createLinkedInPost, createPostWithImage as createLinkedInImagePost, buildAuthorUrn } from './services/linkedin.js';
 import { createPost as createFacebookPost } from './services/facebook.js';
 import { createPost as createTwitterPost } from './services/twitter.js';
 import { createPost as createThreadsPost } from './services/threads.js';
-import { createPost as createRedditPost, refreshAccessToken as refreshRedditToken } from './services/reddit.js';
 import { createPost as createInstagramPost, createInstagramMediaContainer, publishInstagramMedia, waitForMediaReady } from './services/instagram.js';
 
 async function processScheduledPosts() {
@@ -108,26 +109,6 @@ async function processScheduledPosts() {
             );
             break;
 
-          case 'reddit':
-            if (integration.tokenExpiresAt && integration.tokenExpiresAt < new Date() && integration.redditRefreshToken) {
-              const refreshResult = await refreshRedditToken(integration.redditRefreshToken);
-              if (!refreshResult.error) {
-                integration.accessToken = refreshResult.access_token;
-                integration.tokenExpiresAt = new Date(Date.now() + (refreshResult.expires_in || 3600) * 1000);
-                await integration.save();
-              }
-            }
-
-            const redditTitle = trimmed.substring(0, 300);
-            const redditBody = trimmed.length > 300 ? trimmed.substring(300) : ' ';
-            result = await createRedditPost(
-              integration.accessToken,
-              integration.redditSubreddit,
-              redditTitle,
-              redditBody
-            );
-            break;
-
           case 'instagram':
             if (!post.imageUrl) {
               errors.push({ platform: 'instagram', error: 'Instagram requires an image URL' });
@@ -199,7 +180,26 @@ async function processScheduledPosts() {
   }
 }
 
+async function processTrendPolling() {
+  try {
+    const users = await User.find({}).select('_id').lean();
+    for (const u of users) {
+      try {
+        await pollAndGenerateInsights(u._id);
+      } catch (e) {
+        console.error(`Trend poll failed for user ${u._id}:`, e.message);
+      }
+    }
+  } catch (err) {
+    console.error('Trend polling error:', err);
+  }
+}
+
 export function startScheduler() {
   cron.schedule('* * * * *', processScheduledPosts);
   console.log('Scheduler: running every minute');
+
+  // Trend engine: poll every 30 minutes
+  cron.schedule('*/30 * * * *', processTrendPolling);
+  console.log('Trend engine: polling every 30 minutes');
 }

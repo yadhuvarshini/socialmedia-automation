@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import LoadingScreen from '../components/LoadingScreen';
 import './FacebookPageSelection.css';
 
 export default function FacebookPageSelection() {
@@ -57,8 +58,8 @@ export default function FacebookPageSelection() {
   if (loading) {
     return (
       <div className="facebook-page-selection">
-        <div className="facebook-page-selection__card">
-          <div className="facebook-page-selection__loader">Loading pages...</div>
+        <div className="facebook-page-selection__card facebook-page-selection__card--loading">
+          <LoadingScreen compact />
         </div>
       </div>
     );

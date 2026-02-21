@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../hooks/useAuth';
-import { storage, auth } from '../firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import LoadingScreen from './LoadingScreen';
 import './PostComposer.css';
+
+const DRAFT_KEY = 'blazly_composer_draft';
 
 const PLATFORM_LIMITS = {
   linkedin: 3000,
@@ -10,7 +11,6 @@ const PLATFORM_LIMITS = {
   instagram: 2200,
   facebook: 63206,
   threads: 500,
-  reddit: 10000
 };
 
 export default function PostComposer({
@@ -20,9 +20,28 @@ export default function PostComposer({
   onPlatformChange,
   theme = 'standard'
 }) {
-  const [content, setContent] = useState('');
-  const [scheduleAt, setScheduleAt] = useState('');
+  const [content, setContent] = useState(() => {
+    try {
+      const d = sessionStorage.getItem(DRAFT_KEY);
+      if (d) {
+        const p = JSON.parse(d);
+        return p.content || '';
+      }
+    } catch (_) {}
+    return '';
+  });
+  const [scheduleAt, setScheduleAt] = useState(() => {
+    try {
+      const d = sessionStorage.getItem(DRAFT_KEY);
+      if (d) {
+        const p = JSON.parse(d);
+        return p.scheduleAt || '';
+      }
+    } catch (_) {}
+    return '';
+  });
   const [postNow, setPostNow] = useState(true);
+  const [bestTimes, setBestTimes] = useState([]);
   const [platforms, setPlatforms] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -34,8 +53,14 @@ export default function PostComposer({
   // AI State
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [aiTopic, setAiTopic] = useState('');
-  const [aiImagePrompt, setAiImagePrompt] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+  const [imageModalOpen, setImageModalOpen] = useState(false);
+  const [imagePrompt, setImagePrompt] = useState('');
+  const [imageLoading, setImageLoading] = useState(false);
+
+  // Posting overlay (shows during submit, blocks UI, surfaces errors)
+  const [postingError, setPostingError] = useState(null);
+  const [lastPostUrls, setLastPostUrls] = useState(null);
 
   const [mediaItems, setMediaItems] = useState([]);
   const [mediaType, setMediaType] = useState('text'); // 'text', 'image', 'video', 'carousel'
@@ -55,10 +80,33 @@ export default function PostComposer({
   useEffect(() => {
     if (selectedPlatform) {
       setPlatforms([selectedPlatform]);
-      // If we change platform, we don't automatically expand unless it's standard theme
       if (theme === 'standard') setIsExpanded(true);
     }
   }, [selectedPlatform, theme]);
+
+  // Persist draft to sessionStorage (debounced, low cost)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ content, scheduleAt }));
+      } catch (_) {}
+    }, 500);
+    return () => clearTimeout(t);
+  }, [content, scheduleAt]);
+
+  const platformForBestTimes = selectedPlatform || platforms[0];
+
+  // Load best-time suggestions when scheduling
+  useEffect(() => {
+    if (!postNow && platformForBestTimes) {
+      api(`/ai/best-times?platform=${platformForBestTimes}`)
+        .then(r => r.json())
+        .then(d => setBestTimes(d.suggestions || []))
+        .catch(() => setBestTimes([]));
+    } else {
+      setBestTimes([]);
+    }
+  }, [postNow, platformForBestTimes]);
 
   const platformIcons = {
     linkedin: (
@@ -85,17 +133,23 @@ export default function PostComposer({
 
     try {
       for (const file of files) {
-        const fileRef = ref(storage, `posts/${auth.currentUser?.uid || 'anon'}/${Date.now()}_${file.name}`);
-        await uploadBytes(fileRef, file);
-        const url = await getDownloadURL(fileRef);
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await api('/upload', {
+          method: 'POST',
+          body: formData,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.url) throw new Error(data.error || 'Upload failed');
 
+        const url = data.url;
         const isVideo = file.type.startsWith('video/');
         newMediaItems.push({
           type: isVideo ? 'VIDEO' : 'IMAGE',
           imageUrl: isVideo ? null : url,
           videoUrl: isVideo ? url : null,
           preview: url,
-          fileName: file.name
+          fileName: file.name,
         });
       }
       setMediaItems(newMediaItems);
@@ -104,10 +158,10 @@ export default function PostComposer({
       } else {
         setMediaType(newMediaItems[0].type === 'IMAGE' ? 'image' : 'video');
       }
-      setIsExpanded(true); // Auto expand if files uploaded
+      setIsExpanded(true);
     } catch (err) {
       console.error('File upload error:', err);
-      setError('Failed to upload some files.');
+      setError('Failed to upload. Ensure backend is running and try again.');
     } finally {
       setLoading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -154,7 +208,6 @@ export default function PostComposer({
 
   const handleAIGenerate = async () => {
     if (!aiTopic.trim()) return;
-
     setAiLoading(true);
     try {
       const res = await api('/ai/generate', {
@@ -162,46 +215,54 @@ export default function PostComposer({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           topic: aiTopic,
-          imagePrompt: aiImagePrompt,
+          imagePrompt: '',
           platform: selectedPlatform || 'linkedin'
         })
       });
-
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'AI generation failed');
-
-      // Populate content
       let newContent = data.content;
       if (data.hashtags && data.hashtags.length > 0) {
         newContent += '\n\n' + data.hashtags.join(' ');
       }
       setContent(newContent);
-
-      // Populate Image if keyword exists
-      if (data.imageKeyword) {
-        // Use Unsplash Source for a quick relevant image
-        const generatedImageUrl = `https://source.unsplash.com/1600x900/?${encodeURIComponent(data.imageKeyword)}`;
-        setMediaUrl(generatedImageUrl);
-
-        // Trigger the URL handler logic manually since we can't easily call handleUrlSubmit with a fake event safely
-        const newItem = {
-          type: 'IMAGE',
-          imageUrl: generatedImageUrl,
-          videoUrl: null,
-          preview: generatedImageUrl,
-          fileName: 'AI Generated Image'
-        };
-        setMediaItems([newItem]);
-        setMediaType('image');
-      }
-
       setAiModalOpen(false);
       setAiTopic('');
-      setAiImagePrompt('');
     } catch (err) {
       alert('AI Error: ' + err.message);
     } finally {
       setAiLoading(false);
+    }
+  };
+
+  const handleGenerateImage = async () => {
+    const prompt = imagePrompt.trim();
+    setImageLoading(true);
+    try {
+      if (!prompt) return;
+      const res = await api('/ai/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Image generation failed');
+      const generatedImageUrl = data.url;
+      const newItem = {
+        type: 'IMAGE',
+        imageUrl: generatedImageUrl,
+        videoUrl: null,
+        preview: generatedImageUrl,
+        fileName: 'AI Generated'
+      };
+      setMediaItems((prev) => [...prev, newItem]);
+      setMediaType(mediaItems.length >= 1 ? 'carousel' : 'image');
+      setImageModalOpen(false);
+      setImagePrompt('');
+    } catch (err) {
+      alert('Image Error: ' + err.message);
+    } finally {
+      setImageLoading(false);
     }
   };
 
@@ -227,6 +288,7 @@ export default function PostComposer({
     }
 
     setLoading(true);
+    setPostingError(null);
 
     try {
       const postData = {
@@ -260,17 +322,32 @@ export default function PostComposer({
         body: JSON.stringify(body),
       });
 
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Failed to publish');
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = result.error || result.details || result.message
+          || (result.errors && Array.isArray(result.errors)
+            ? result.errors.map(e => e.error || e.message).join('. ')
+            : null)
+          || `Request failed (${res.status})`;
+        throw new Error(msg);
+      }
 
       setSuccess(postNow ? 'Post published successfully!' : 'Post scheduled successfully!');
+      const urls = result.platformUrls ? Object.entries(result.platformUrls).filter(([, v]) => v) : [];
+      setLastPostUrls(urls.length ? urls : null);
       setContent('');
       setMediaItems([]);
       setMediaType('text');
       setIsExpanded(false);
+      setPostingError(null);
+      try {
+        sessionStorage.removeItem(DRAFT_KEY);
+      } catch (_) {}
       onSuccess?.();
     } catch (err) {
-      setError(err.message);
+      const errMsg = err.message || 'Failed to publish. Please try again.';
+      setError(errMsg);
+      setPostingError(errMsg);
     } finally {
       setLoading(false);
     }
@@ -308,41 +385,77 @@ export default function PostComposer({
 
   return (
     <>
+      {/* Posting overlay: blocks UI, shows progress/errors */}
+      {loading && (
+        <div className="posting-overlay" aria-live="polite">
+          <div className="posting-overlay__card posting-overlay__card--loading">
+            <LoadingScreen compact />
+            <p className="posting-overlay__hint">{postNow ? 'Publishing…' : 'Scheduling…'} Please wait.</p>
+          </div>
+        </div>
+      )}
+      {postingError && !loading && (
+        <div className="posting-overlay posting-overlay--error" onClick={() => setPostingError(null)}>
+          <div className="posting-overlay__card posting-overlay__card--error" onClick={e => e.stopPropagation()}>
+            <p className="posting-overlay__error-title">Post failed</p>
+            <p className="posting-overlay__error-msg">{postingError}</p>
+            <button className="posting-overlay__dismiss" onClick={() => setPostingError(null)}>Dismiss</button>
+          </div>
+        </div>
+      )}
+
       {aiModalOpen && (
         <div className="ai-modal-overlay">
           <div className="ai-modal">
             <h3>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 1 0 10 10H12V2z"></path><path d="M12 2a10 10 0 0 1 10 10"></path><path d="M12 12 2.1 10.5"></path></svg>
-              Generate with Gemini AI
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2a10 10 0 1 0 10 10H12V2z"></path><path d="M12 2a10 10 0 0 1 10 10"></path><path d="M12 12 2.1 10.5"></path></svg>
+              Generate post with AI
             </h3>
-            <p style={{ margin: 0, color: '#666' }}>Describe what you want to post about, and our AI will write the copy and find an image for you.</p>
+            <p className="ai-modal__desc">Describe your topic. AI writes the caption. Add images separately with the image button below.</p>
             <textarea
               placeholder="Ex: A professional update about launching our new sustainability initiative..."
               value={aiTopic}
               onChange={(e) => setAiTopic(e.target.value)}
               autoFocus
-              style={{ marginBottom: '12px' }}
-            />
-            <input
-              type="text"
-              placeholder="Image Context (Optional) - Ex: 'Green office space'"
-              value={aiImagePrompt}
-              onChange={(e) => setAiImagePrompt(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '12px',
-                border: '1px solid #d0d0d0',
-                borderRadius: '8px',
-                fontSize: '1rem',
-                outline: 'none'
-              }}
+              className="ai-modal__textarea"
             />
             <div className="ai-modal__actions">
               <button className="btn-secondary" onClick={() => setAiModalOpen(false)}>Cancel</button>
               <button className="btn-primary-ai" onClick={handleAIGenerate} disabled={aiLoading || !aiTopic.trim()}>
-                {aiLoading ? 'Generating...' : '✨ Generate Post'}
+                {aiLoading ? 'Generating...' : 'Generate Post'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {imageModalOpen && (
+        <div className="ai-modal-overlay">
+          <div className="ai-modal ai-modal--image">
+            {imageLoading ? (
+              <div className="ai-modal__loading">
+                <LoadingScreen compact lightBg />
+              </div>
+            ) : (
+              <>
+                <h3>Generate image</h3>
+                <p className="ai-modal__desc">Describe the image you want — your prompt is used exactly (e.g. mcp architecture diagram, modern office).</p>
+                <input
+                  type="text"
+                  placeholder="Ex: MCP architecture diagram, team collaboration, abstract gradient"
+                  value={imagePrompt}
+                  onChange={(e) => setImagePrompt(e.target.value)}
+                  className="ai-modal__input"
+                  autoFocus
+                />
+                <div className="ai-modal__actions">
+                  <button className="btn-secondary" onClick={() => setImageModalOpen(false)} disabled={imageLoading}>Cancel</button>
+                  <button className="btn-primary-ai" onClick={handleGenerateImage} disabled={imageLoading || !imagePrompt.trim()}>
+                    Generate Image
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -355,7 +468,7 @@ export default function PostComposer({
           </div>
         )}
 
-        {!isLinkedIn && (
+        {!isLinkedIn && !selectedPlatform && (
           <div className="composer__header">
             <h2 className="composer__title">Create Post</h2>
             <div className="composer__platform-icons">
@@ -413,12 +526,21 @@ export default function PostComposer({
               </button>
               <button
                 type="button"
-                className={`composer__action-btn composer__ai-btn`}
+                className="composer__action-btn composer__ai-btn"
                 onClick={() => setAiModalOpen(true)}
                 disabled={loading}
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" /></svg>
-                AI Generate
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" /></svg>
+                AI Post
+              </button>
+              <button
+                type="button"
+                className="composer__action-btn composer__image-btn"
+                onClick={() => setImageModalOpen(true)}
+                disabled={loading}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></svg>
+                AI Image
               </button>
               <button
                 type="button"
@@ -464,9 +586,21 @@ export default function PostComposer({
                 {mediaItems.length > 0 && (
                   <div className="composer__media-gallery">
                     {mediaItems.map((item, idx) => (
-                      <div key={idx} className="composer__media-thumbnail">
+                      <div key={idx} className="composer__media-thumbnail composer__media-thumbnail--large">
                         {item.type === 'IMAGE' ? (
-                          <img src={item.preview} alt="" />
+                          <div className="composer__img-wrap">
+                            <img
+                              src={item.imageUrl || item.preview}
+                              alt=""
+                              onError={(e) => {
+                                e.target.onerror = null;
+                                e.target.style.display = 'none';
+                                const wrap = e.target.closest('.composer__img-wrap');
+                                wrap?.querySelector('.composer__img-failed')?.classList.add('composer__img-failed--show');
+                              }}
+                            />
+                            <span className="composer__img-failed">Image failed to load</span>
+                          </div>
                         ) : (
                           <div className="composer__video-icon">▶</div>
                         )}
@@ -500,19 +634,39 @@ export default function PostComposer({
                 <span className="composer__toggle-label">Schedule</span>
               </label>
               {!postNow && (
-                <input
-                  type="datetime-local"
-                  className="composer__datetime"
-                  value={scheduleAt}
-                  onChange={(e) => setScheduleAt(e.target.value)}
-                  min={new Date().toISOString().slice(0, 16)}
-                />
+                <>
+                  <input
+                    type="datetime-local"
+                    className="composer__datetime"
+                    value={scheduleAt}
+                    onChange={(e) => setScheduleAt(e.target.value)}
+                    min={new Date().toISOString().slice(0, 16)}
+                  />
+                  {bestTimes.length > 0 && (
+                    <div className="composer__best-times">
+                      <span className="composer__best-times-label">Suggested:</span>
+                      {bestTimes.slice(0, 3).map((s, i) => (
+                        <span key={i} className="composer__best-time-hint">{s}</span>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
             <div className="composer__submit-area">
               {error && <p className="composer__error">{error}</p>}
               {success && <p className="composer__success">{success}</p>}
+              {lastPostUrls && lastPostUrls.length > 0 && (
+                <div className="composer__share-links">
+                  {lastPostUrls.map(([platform, url]) => (
+                    <a key={platform} href={url} target="_blank" rel="noopener noreferrer" className="composer__share-link">
+                      View on {platform}
+                    </a>
+                  ))}
+                  <button type="button" className="composer__share-dismiss" onClick={() => setLastPostUrls(null)} aria-label="Close">×</button>
+                </div>
+              )}
               <div className="composer__actions-row">
                 <span className={`composer__counter ${isOverLimit ? 'composer__counter--error' : ''}`}>
                   {charCount} / {currentLimit}

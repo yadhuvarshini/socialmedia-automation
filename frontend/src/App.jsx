@@ -1,14 +1,22 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
+import LoadingScreen from './components/LoadingScreen';
 import Landing from './pages/Landing';
+import Onboarding from './pages/Onboarding';
 import Home from './pages/Home';
+import Profile from './pages/Profile';
+import Posts from './pages/Posts';
+import Planner from './pages/Planner';
+import Inbox from './pages/Inbox';
+import Competitors from './pages/Competitors';
+import Integrations from './pages/Integrations';
 import FacebookPageSelection from './pages/FacebookPageSelection';
-import RedditSubredditSelection from './pages/RedditSubredditSelection';
 import InstagramAccountSelection from './pages/InstagramAccountSelection';
+import AppLayout from './components/AppLayout';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
-  if (loading) return <div className="app-loading">Loading…</div>;
+  if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/" replace />;
   return children;
 }
@@ -18,10 +26,80 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route
+        path="/onboarding"
+        element={
+          <ProtectedRoute>
+            <Onboarding />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/home"
         element={
           <ProtectedRoute>
-            <Home />
+            <AppLayout>
+              <Home />
+            </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <AppLayout>
+              <Profile />
+            </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile/competitors"
+        element={
+          <ProtectedRoute>
+            <AppLayout>
+              <Competitors />
+            </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/posts"
+        element={
+          <ProtectedRoute>
+            <AppLayout>
+              <Posts />
+            </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/planner"
+        element={
+          <ProtectedRoute>
+            <AppLayout>
+              <Planner />
+            </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/inbox"
+        element={
+          <ProtectedRoute>
+            <AppLayout>
+              <Inbox />
+            </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/integrations"
+        element={
+          <ProtectedRoute>
+            <AppLayout>
+              <Integrations />
+            </AppLayout>
           </ProtectedRoute>
         }
       />
@@ -30,14 +108,6 @@ export default function App() {
         element={
           <ProtectedRoute>
             <FacebookPageSelection />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/integrations/reddit/select-subreddit"
-        element={
-          <ProtectedRoute>
-            <RedditSubredditSelection />
           </ProtectedRoute>
         }
       />

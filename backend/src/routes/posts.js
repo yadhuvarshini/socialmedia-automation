@@ -9,7 +9,6 @@ import { createPost as createLinkedInPost, createPostWithImage as createLinkedIn
 import { createPost as createFacebookPost } from '../services/facebook.js';
 import { createPost as createTwitterPost } from '../services/twitter.js';
 import { createPost as createThreadsPost } from '../services/threads.js';
-import { createPost as createRedditPost, refreshAccessToken as refreshRedditToken } from '../services/reddit.js';
 import { createPost as createInstagramPost, createInstagramMediaContainer, publishInstagramMedia, getInstagramPublishingLimit, waitForMediaReady } from '../services/instagram.js';
 
 const router = Router();
@@ -17,23 +16,29 @@ router.use(requireAuth);
 
 router.get('/', async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 5;
+    const limit = req.query.format ? Math.min(parseInt(req.query.limit) || 5000, 5000) : (parseInt(req.query.limit) || 10);
     const startAfter = req.query.startAfter;
     const platform = req.query.platform;
+    const fromDate = req.query.fromDate;
+    const toDate = req.query.toDate;
+    const status = req.query.status;
+    const format = req.query.format;
 
     let baseQuery = { userId: req.user._id };
-    if (platform) {
-      baseQuery.platforms = platform;
+    if (platform) baseQuery.platforms = platform;
+    if (status) baseQuery.status = status;
+    if (fromDate || toDate) {
+      baseQuery.createdAt = {};
+      if (fromDate) baseQuery.createdAt.$gte = new Date(fromDate);
+      if (toDate) baseQuery.createdAt.$lte = new Date(toDate + 'T23:59:59.999Z');
     }
 
-    let query = Post.find(baseQuery)
-      .sort({ createdAt: -1 })
-      .limit(limit);
+    let query = Post.find(baseQuery).sort({ createdAt: -1 }).limit(limit);
 
     if (startAfter) {
       query = Post.find({
         ...baseQuery,
-        _id: { $lt: startAfter }
+        _id: { $lt: startAfter },
       })
         .sort({ createdAt: -1 })
         .limit(limit);
@@ -42,20 +47,51 @@ router.get('/', async (req, res) => {
     const posts = await query.exec();
     const total = await Post.countDocuments(baseQuery);
 
-    // Format for frontend
     const formattedPosts = posts.map(doc => ({
       id: doc._id.toString(),
-      ...doc.toObject()
+      ...doc.toObject(),
     }));
 
-    res.json({
-      posts: formattedPosts,
-      total,
-      hasMore: formattedPosts.length === limit
-    });
+    if (format === 'csv') {
+      const headers = ['id', 'content', 'platforms', 'status', 'createdAt', 'publishedAt', 'scheduledAt'];
+      const rows = formattedPosts.map(p => [
+        p.id,
+        (p.content || '').replace(/"/g, '""'),
+        (p.platforms || []).join(';'),
+        p.status || '',
+        p.createdAt ? new Date(p.createdAt).toISOString() : '',
+        p.publishedAt ? new Date(p.publishedAt).toISOString() : '',
+        p.scheduledAt ? new Date(p.scheduledAt).toISOString() : '',
+      ].map(c => `"${String(c)}"`).join(','));
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=posts.csv');
+      return res.send(['"' + headers.join('","') + '"', ...rows].join('\n'));
+    }
+
+    if (format === 'json') {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', 'attachment; filename=posts.json');
+      return res.send(JSON.stringify({ posts: formattedPosts, total }, null, 2));
+    }
+
+    res.json({ posts: formattedPosts, total, hasMore: formattedPosts.length === limit });
   } catch (err) {
     console.error('Error fetching posts:', err);
     res.status(500).json({ error: 'Failed to fetch posts' });
+  }
+});
+
+router.get('/:id/urls', async (req, res) => {
+  try {
+    const post = await Post.findOne({
+      _id: req.params.id,
+      userId: req.user._id,
+    });
+    if (!post) return res.status(404).json({ error: 'Post not found' });
+    const urls = post.platformUrls ? Object.fromEntries(post.platformUrls) : {};
+    res.json({ id: post._id.toString(), platformUrls: urls, imageUrl: post.imageUrl });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -280,43 +316,6 @@ router.post('/', async (req, res) => {
             await integration.save();
             break;
 
-          case 'reddit':
-            if (!integration.accessToken || !integration.redditSubreddit) {
-              errors.push({ platform: 'reddit', error: 'Reddit credentials or subreddit missing' });
-              continue;
-            }
-            // Check if token is expired and refresh if needed
-            if (integration.tokenExpiresAt && integration.tokenExpiresAt < new Date() && integration.redditRefreshToken) {
-              const refreshResult = await refreshRedditToken(integration.redditRefreshToken);
-              if (refreshResult.error) {
-                errors.push({ platform: 'reddit', error: 'Failed to refresh Reddit token: ' + refreshResult.error });
-                continue;
-              }
-              integration.accessToken = refreshResult.access_token;
-              integration.tokenExpiresAt = new Date(Date.now() + (refreshResult.expires_in || 3600) * 1000);
-            }
-            if (trimmed.length > 300) {
-              // Reddit: use first 300 chars as title, rest as body
-              const redditTitle = trimmed.substring(0, 300);
-              const redditBody = trimmed.substring(300);
-              result = await createRedditPost(
-                integration.accessToken,
-                integration.redditSubreddit,
-                redditTitle,
-                redditBody
-              );
-            } else {
-              result = await createRedditPost(
-                integration.accessToken,
-                integration.redditSubreddit,
-                trimmed,
-                ' '
-              );
-            }
-            integration.lastUsedAt = new Date();
-            await integration.save();
-            break;
-
           case 'instagram':
             const igAccountId = integration.instagramBusinessAccountId || integration.platformUserId;
             const igAccessToken = integration.instagramPageAccessToken || integration.accessToken;
@@ -429,6 +428,31 @@ router.post('/', async (req, res) => {
   res.status(201).json({ id: newPost._id.toString(), ...newPost.toObject() });
 });
 
+/** PATCH /posts/:id/reschedule - Reschedule a scheduled post */
+router.patch('/:id/reschedule', async (req, res) => {
+  try {
+    const post = await Post.findOne({
+      _id: req.params.id,
+      userId: req.user._id,
+    });
+    if (!post) return res.status(404).json({ error: 'Post not found' });
+    if (post.status !== 'scheduled') {
+      return res.status(400).json({ error: 'Only scheduled posts can be rescheduled' });
+    }
+    const { scheduledTime } = req.body || {};
+    if (!scheduledTime) return res.status(400).json({ error: 'scheduledTime is required' });
+    const d = new Date(scheduledTime);
+    if (Number.isNaN(d.getTime()) || d <= new Date()) {
+      return res.status(400).json({ error: 'scheduledTime must be a valid future date' });
+    }
+    post.scheduledAt = d;
+    await post.save();
+    res.json({ id: post._id.toString(), ...post.toObject() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.patch('/:id', async (req, res) => {
   try {
     const post = await Post.findOne({
@@ -487,10 +511,10 @@ router.post('/image', async (req, res) => {
       return res.status(400).json({ error: 'imageUrl and platforms are required' });
     }
 
-    // Validate that imageUrl is a proper HTTPS URL (not data URL or localhost)
+    // Validate that imageUrl is publicly accessible (LinkedIn & Instagram require fetchable URLs)
     if (imageUrl.startsWith('data:') || imageUrl.includes('localhost') || imageUrl.includes('127.0.0.1')) {
       return res.status(400).json({
-        error: 'Instagram requires publicly accessible HTTPS image URLs. Please upload images to a public server first.'
+        error: 'Image URLs must be publicly accessible for LinkedIn/Instagram. Set UPLOAD_BASE_URL to your S3/Firebase URL in .env, or use relative /uploads for local dev.'
       });
     }
 

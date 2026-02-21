@@ -3,21 +3,47 @@ import bcrypt from 'bcryptjs';
 
 const userSchema = new mongoose.Schema(
   {
+    name: { type: String },
     email: { type: String, unique: true, sparse: true },
     firebaseUid: { type: String, unique: true, sparse: true, index: true },
-    password: { type: String }, // For application auth (if needed)
+    password: { type: String },
+    timezone: { type: String, default: 'UTC' },
+    profileCompletion: { type: Number, default: 0, min: 0, max: 100 },
+    onboardingStep: { type: Number, default: 1, min: 1, max: 5 },
     profile: {
       firstName: String,
       lastName: String,
       profilePicture: String,
     },
-    // Application-level settings
     settings: {
       theme: { type: String, default: 'light' },
       notifications: { type: Boolean, default: true },
+      emailContentSuggestions: { type: Boolean, default: false },
+      notificationEmail: { type: String },
+      inboxAutoReply: { type: Boolean, default: false },
+    },
+    // AI custom instructions (ChatGPT-style)
+    aiInstructions: {
+      global: { type: String, default: '' },
+      useGlobalForAll: { type: Boolean, default: true },
+      platforms: {
+        linkedin: String,
+        twitter: String,
+        instagram: String,
+        facebook: String,
+        threads: String,
+      },
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: {
+      transform: (doc, ret) => {
+        delete ret.password;
+        return ret;
+      },
+    },
+  }
 );
 
 // Hash password before saving
